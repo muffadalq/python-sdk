@@ -4,18 +4,18 @@ Introduction
 ------------
 
 This is Python SDK version 0.1 for the Datera Fabric Services API.
-Download and use of this package implicitly accepts the Datera End-User-Licence-Agreement (EULA),
-which can be referenced here:  ______________________
+Download and use of this package implicitly accepts the terms in COPYING
 
-Users of this package are assumed to have familiarity with the Datera API,
-as documented here:  __________________________________
+Users of this package are assumed to have familiarity with the Datera API.
 Details around the API itself are not necessarily covered through this SDK.
 
 
 Installation
 ------------
-This package is distributed in '.tar' format.
-To install, untar and type "python setup.py install"
+To install:
+   git clone https://github.com/Datera/python-sdk.git 
+   cd python-sdk
+   python setup.py install
 
 
 Managed Objects
