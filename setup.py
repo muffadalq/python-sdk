@@ -12,6 +12,6 @@ setup(
     packages=['dfs_sdk'],
     package_dir = {'': 'src'},
     include_package_data=True,
-    install_requires=[]
-    # scripts=['utils/brie','utils/dtsmpmap']
+    install_requires=[],
+    scripts=['utils/dhutil']
 )

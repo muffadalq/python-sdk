@@ -108,6 +108,39 @@ Attribute assignment for 'create', and 'set' methods can be provided as follows:
 		ai.set(admin_state="offline")
 
 
+'dhutil' : Datera Host Utility
+------------------------------
+
+The 'dhutil' host-utility is provided along with this SDK.
+'dhutil' can be used as both a reference example for using the SDK,
+as well as providing some common host-side utility.
+For example, a given storage/application lifecycle might looks like this:
+
+1) To create 5 app_instances named 'mongodev', each with a single 10G volume,
+and to perform the host-side iscsi scan and login:
+  dhutil --basename mongodev --count 5 --size 10
+
+2) To view the multipath mapping to the host:
+  dhutil --mpmap
+
+3) To create ext4 filesystems for the 'mongodb' volumes, 
+mount them at '/mnt' and change the permissions to 'mongodb:mongodb':
+  dhutil --basename mongodev --mkfs --dirprefix /mnt --chown mongodb:mongodb
+
+4) To do a complete teardown (unmount, remove directory, iscsi logout, delete app_instances):
+  dhutil --basename mongodev --cleanall
+
+Note that steps 1 and 3 could be combined as follows:
+   dhutil --basename mongodev --count 5 --size 10 --mkfs --dirprefix /mnt --chown mongodb:mongodb
+Or a corresponding "app_template" could be used, if available:
+   dhutil --basename mongodev --count 5 --template mongodb ...
+
+Caveats:  'dhutil' presumes a 'singleton' model, whereby an app_instance
+is created with a single storage_instance with a single volume.
+Extending the functionality is left as an exercise for the reader 
+and is strongly encouraged!
+
+
 Reporting Problems
 ------------------
 For problems and feedback, please email "support@datera.io"

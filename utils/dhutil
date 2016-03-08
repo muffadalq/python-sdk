@@ -1,0 +1,422 @@
+#!/usr/bin/env python
+"""
+
+dhutil:    Datera Host Utility
+
+Usage:
+    dhutil
+        --basename <string>
+        --template <string>
+        --size <string> (GB)
+        --count <int>
+        --cleanall
+        --showall
+        --mkfs
+        --mpmap
+        --dirprefix <string>
+        --chown <string>
+
+    'basename' corresponds to the app_instance
+    'size' is interpreted as number of GB.
+    'count' is the number of app_instances to create
+    'template' must refer to an existing template
+    'cleanall' applies only to a given 'basename'
+    'showall' takes no other args/options
+    'mkfs' will create ext4 file systems on the volumes created
+    'mpmap' will show the hostside multipath volume mapping
+    'dirprefix' specifies a mount point prefix for the volume mount
+    'chown' specifies chown:chgrp for the mount point
+
+"""
+import sys
+import os
+import subprocess
+import platform
+import time
+import argparse
+import linecache
+import re
+import multiprocessing as mp
+from dfs_sdk import DateraApi
+
+SLEEP = 10
+
+
+def usage():
+    print """
+Usage:
+    dhutil
+        --basename <string>
+        --template <string>
+        --size <string> (GB)
+        --count <int>
+        --cleanall
+        --showall
+        --mkfs
+        --mpmap
+        --dirprefix <string>
+        --chown <string>
+
+    'basename' corresponds to the app_instance
+    'size' is interpreted as number of GB.
+    'count' is the number of app_instances to create
+    'template' must refer to an existing template
+    'cleanall' applies only to a given 'basename'
+    'showall' takes no other args/options
+    'mkfs' will create ext4 file systems on the volumes created
+    'mpmap' will show the hostside multipath volume mapping
+    'dirprefix' specifies a mount point prefix for the volume mount
+    'chown' specifies chown:chgrp for the mount point
+
+
+"""
+
+    exit(1)
+
+#
+# Create Volume within a storage instance.
+# Takes storage_instance as input parameter
+#
+
+
+def vol_create(api, si, name, size):
+    vol = si.volumes.create(name=name, size=size)
+    return vol['uuid']
+
+
+def initiator_create(api, name, id):
+    iis = api.initiators.list()
+    for i in iis:
+        if i['id'] == id:
+            print "Initiator: (%s) %s,  already exists" % (i['name'], id)
+            return i
+    print "Creating Initiator: (%s) %s" % (name, id)
+    return api.initiators.create(name=name, id=id)
+
+
+def PrintException():
+    exc_type, exc_obj, tb = sys.exc_info()
+    f = tb.tb_frame
+    lineno = tb.tb_lineno
+    filename = f.f_code.co_filename
+    linecache.checkcache(filename)
+    line = linecache.getline(filename, lineno, f.f_globals)
+    print 'EXCEPTION IN ({}, LINE {} "{}"): {}'.format(
+           filename, lineno, line.strip(), exc_obj)
+
+
+def run_cmd(cmd):
+    print cmd
+    os.system(cmd)
+
+
+def target_logout(api, node, name):
+    for ai in api.app_instances.list():
+        for si in ai.storage_instances.list():
+            if name in ai['name']:
+                if 'iqn' in si['access']:
+                    run_cmd("iscsiadm -m node -u -T %s" %
+                            si['access']['iqn'])
+
+
+def discover_targets(node, si, initiator, sleep=SLEEP):
+    # Wait a bit ...
+    if sleep != 0:
+        print "Wait %s for storage to come online " % sleep
+        time.sleep(sleep)
+    print "IQN: " + si['access']['iqn']
+    for ip in si['access']['ips']:
+        print "IP ADDRS = ", ip
+        cmd = "iscsiadm -m discovery -t sendtargets --portal {}".format(ip)
+        cmd = cmd + " > /dev/null 2>&1"
+        run_cmd(cmd)
+
+    # Try logging in to the targets that are accessible
+    for init in si.acl_policy.initiators.list():
+        if init['id'] == initiator:
+            iqn = si['access']['iqn']
+            run_cmd("iscsiadm -m node -T %s -l > /dev/null 2>&1" % iqn)
+
+
+def clean_all(api, target):
+    for app_instance in api.app_instances.list():
+        if not app_instance["name"].startswith(target):
+            continue
+        print "Delete app instance " + app_instance['name']
+        app_instance.set(admin_state="offline", force=True)
+        app_instance.delete()
+    for initiator in api.initiators.list():
+        if not initiator["name"].startswith(target):
+            continue
+        print "Delete initiator " + initiator['name']
+        initiator.delete()
+
+
+def show_all(api):
+    for at in api.app_templates.list():
+        print "App_Template: " + at['name']
+    for ai in api.app_instances.list():
+        print "App_instance: " + ai['name']
+        print "    admin_state: ", ai['admin_state']
+        for si in ai.storage_instances.list():
+            print "    -Storage_instance: " + si['name']
+            for i in si.acl_policy.initiators.list():
+                print "        +Initiators: %s  (%s)" % (i['id'], i['name'])
+            if 'iqn' in si['access']:
+                print "        +IQN: " + si['access']['iqn']
+            for ip in si['access']['ips']:
+                print "        +ACCESS IP: " + ip
+            for v in si.volumes.list():
+                print "        =Volume: {},   Size : {},   UUID : {} ".format(
+                        v['name'], v['size'], v['uuid'])
+
+
+def mkfs(devmnt):
+    cmd = "mkfs.ext4 {} ; mkdir -p /{}; mount {} /{}".format(
+        devmnt[0], devmnt[1], devmnt[0], devmnt[1])
+    print cmd
+    os.system(cmd)
+    if devmnt[3]:
+        os.system("chown -R {} /{}".format(devmnt[3], devmnt[1]))
+
+
+def mpmap(api, dirprefix, chown, basename, domkfs):
+
+    dist = platform.dist()[0]
+    map = {}
+    mntmap = []
+
+    for ai in api.app_instances.list():
+        for si in ai.storage_instances.list():
+            for v in si.volumes.list():
+                if not basename or basename in ai['name']:
+                    id = re.sub(r'-', r'', v['uuid'])
+                    mid = id[:25]
+                    map[mid] = {'aname': ai['name'], 'sname': si['name'],
+                                'vname': v['name'], 'id': id}
+                    if 'iqn' in si['access']:
+                        map[mid]['iqn'] = si['access']['iqn']
+
+    os.system("multipath -v2 > /dev/null 2>&1")
+    for line in os.popen("multipath -ll | grep DATERA"):
+        #
+        # "Ubuntu" form:
+        #    360014052fe62c362fb84253a562a8add dm-56 DATERA,IBLOCK
+        # 'centos' form:
+        #    mpathe (36001405bcbca70467fb45c9a34fc2554) dm-5 DATERA,IBLOCK
+        #
+        if dist == "Ubuntu":
+            lunid, dm, junk = line.split()
+            mlunid = lunid[8:]
+        elif dist == "centos":
+            junk, lunid, dm, junk, junk = line.split()
+            foo = re.sub(r'[()]', r'', lunid)
+            mlunid = foo[8:]
+        else:
+            print "Can't deal with Distro: ", dist
+            sys.exit(-1)
+        if mlunid in map:
+            dev = "/dev/" + dm
+            print "HOST: {}   lunid: {}  DATERA: {}/{}/{}   IQN: {}".format(
+                dev, lunid, map[mlunid]['aname'], map[mlunid]['sname'],
+                map[mlunid]['vname'], map[mlunid]['iqn'])
+            if domkfs:
+                # ASSUME single storage instance.  mntpoint = appinst + volname
+                # mntpoint = map[mlunid]['aname'] + '-' + map[mlunid]['vname']
+                mntpoint = map[mlunid]['aname']
+                # Delete the hostname/initiator prefix (e.g. "tlx102")
+                # mntpoint = re.sub (r'^[^_]*_', "", map[mlunid]['name'])
+                # Change any remaining '_' to '-'
+                mntpoint = re.sub(r'_', "-", mntpoint)
+                if dirprefix:
+                    mntpoint = dirprefix + "/" + mntpoint
+                if chown:
+                    mntmap.append([dev, mntpoint, lunid, chown])
+                else:
+                    mntmap.append([dev, mntpoint, lunid, None])
+
+    if domkfs:
+        pool = mp.Pool()
+        list(pool.imap_unordered(mkfs, mntmap))
+
+
+def chktempl(api, templ):
+    for at in api.app_templates.list():
+        if at['name'] == templ:
+            return True
+    return False
+
+
+def unmount(name):
+    cmd = "mount |grep %s | awk '{print $3}'" % name
+    for l in os.popen(cmd).readlines():
+        line = l.rstrip()
+        p = os.path.basename(line)
+        run_cmd("umount %s" % line)
+        run_cmd("rm -rf %s" % line)
+
+
+def nocreds():
+    print
+    print "Credentials needed of form 'user:password:IPAddr'"
+    print "supplied in DTSCREDS environment variable"
+    print
+    sys.exit(-1)
+
+
+def chk_args(args):
+
+    if not args.basename and not (args.showall or args.mpmap or
+                                  args.cleanall):
+        usage()
+
+    if args.basename and not (args.template or args.count or
+                              args.cleanall or args.mpmap or args.mkfs):
+        usage()
+
+    if args.cleanall and (args.size or args.count or args.showall or
+                          args.mkfs or args.mpmap or args.dirprefix or
+                          args.chown or args.template):
+        usage()
+
+
+def dbck():
+    # Check for docker bug: https://github.com/docker/docker/issues/7101"
+    try:
+        subprocess.check_output(
+            "grep sysfs /proc/mounts | grep ro", shell=True)
+        try:
+            subprocess.call("mount -o rw,remount sysfs /sys")
+            sys.exit(0)
+        except Exception as e:
+            print "Encountered https://github.com/docker/docker/issues/7101"
+            print "and cannot remount /sys.  Need to be root?"
+            sys.exit(1)
+    except Exception as e:
+        # sysfs is not mounted 'ro'
+        pass
+
+
+def main():
+
+    if (len(sys.argv) < 2):
+        usage()
+
+    dbck()
+    parser = argparse.ArgumentParser(description='dhutil')
+    parser.add_argument('--basename', action="store", dest="basename")
+    parser.add_argument('--template', action="store", dest="template")
+    parser.add_argument('--size', action="store", dest="size")
+    parser.add_argument('--count', action="store", dest='count', type=int)
+    parser.add_argument('--cleanall', action="store_true")
+    parser.add_argument('--showall', action="store_true")
+    parser.add_argument('--mkfs', action="store_true")
+    parser.add_argument('--mpmap', action="store_true")
+    parser.add_argument('--dirprefix', action="store", dest='dirprefix')
+    parser.add_argument('--chown', action="store", dest='chown')
+    args = parser.parse_args()
+
+    creds = os.getenv("DTSCREDS")
+    if not creds or creds == "":
+        nocreds()
+    user, password, ipaddr = creds.split(":")
+
+    basename = args.basename
+
+    if not basename and not args.showall and not args.mpmap:
+        usage()
+    if basename and len(basename) < 3:
+        print "Validation Error:  %s : must be at least 3 chars" % basename
+        sys.exit(-1)
+
+    # Make sure args make sense
+    chk_args(args)
+
+    try:
+        print "Connecting to : ", ipaddr
+        api = DateraApi(username=user, password=password, hostname=ipaddr)
+    except Exception as e:
+        PrintException()
+        sys.exit(1)
+
+    host = os.uname()[1].split('.')[0]
+
+    if args.cleanall:
+        unmount(args.basename)
+        target_logout(api, host, basename)
+        clean_all(api, basename)
+        sys.exit(0)
+
+    if args.showall:
+        show_all(api)
+        if args.mpmap:
+            mpmap(api, args.dirprefix, args.chown, args.basename, args.mkfs)
+        sys.exit(0)
+
+    if args.mpmap and not args.count:
+        mpmap(api, args.dirprefix, args.chown, args.basename, args.mkfs)
+        sys.exit(0)
+
+    # target_logout(api, host, basename)
+    cmd = "grep '^InitiatorName' /etc/iscsi/initiatorname.iscsi"
+    cmd = cmd + " | sed -e 's/InitiatorName=//'"
+    iscsi_initiator = os.popen(cmd).read().strip()
+    ii = initiator_create(api, host, iscsi_initiator)
+
+    #
+    # Semantics:  If a template exists, create args.count instances
+    #             from that template.
+    #             If a template does not exist, create args.count instances
+    #             Assumes 1:1:1 ratio of AppInstance:StorageInstance:Volume
+    # TODO:       Allow non-singleton configurations
+
+    # Make sure template exists
+    if args.template:
+        if chktempl(api, args.template):
+            # Create N app_instances from the template
+            for n in range(1, args.count + 1):
+                appname = "%s-%d" % (args.basename, n)
+                tname = "/app_templates/" + args.template
+                ai = api.app_instances.create(name=appname, app_template=tname)
+                print "Created app_instance: ", ai['name']
+                for si in ai.storage_instances.list():
+                    si.acl_policy.initiators.add(ii)
+            # Login to the storage
+            print "Waiting 10 for storage to come online ..."
+            time.sleep(10)
+            for ai in api.app_instances.list():
+                if args.basename in ai['name']:
+                    for si in ai.storage_instances.list():
+                        discover_targets(host, si, iscsi_initiator, sleep=0)
+            run_cmd("lsscsi -t")
+        else:
+            print args.template, " : does not exist!"
+            sys.exit(-1)
+    elif args.count:
+        #
+        # Create N app_instances, storage_instance, and add initiator
+        #
+        for i in range(1, args.count + 1):
+            bname = "{}_{}".format(basename, i)
+            ai = api.app_instances.create(name=bname)
+            si = ai.storage_instances.create(name=bname)
+            si.acl_policy.initiators.add(ii)
+            volname = "{}_vol".format(bname)
+            uuid = vol_create(api, si=si, name=volname, size=int(args.size))
+            print "Created Volume: %s (%s)" % (volname, uuid)
+
+        print "Waiting 10 for storage to come online ..."
+        time.sleep(10)
+        for ai in api.app_instances.list():
+            if basename in ai['name']:
+                si = ai.storage_instances.list()[0]
+                discover_targets(host, si, iscsi_initiator, sleep=0)
+
+        run_cmd("lsscsi -t")
+
+    if args.mkfs:
+        mpmap(api, args.dirprefix, args.chown, args.basename, args.mkfs)
+
+
+if __name__ == '__main__':
+    main()
