@@ -9,6 +9,7 @@ Usage:
         --template <string>
         --size <string> (GB)
         --count <int>
+        --numreplicas <int>
         --cleanall
         --showall
         --mkfs
@@ -19,6 +20,7 @@ Usage:
     'basename' corresponds to the app_instance
     'size' is interpreted as number of GB.
     'count' is the number of app_instances to create
+    'numreplicas' is the number of replicas to create
     'template' must refer to an existing template
     'cleanall' applies only to a given 'basename'
     'showall' takes no other args/options
@@ -40,6 +42,7 @@ import multiprocessing as mp
 from dfs_sdk import DateraApi
 
 SLEEP = 10
+NUMREPLICAS = 3
 
 
 def usage():
@@ -50,6 +53,7 @@ Usage:
         --template <string>
         --size <string> (GB)
         --count <int>
+        --numreplicas <int>
         --cleanall
         --showall
         --mkfs
@@ -60,6 +64,7 @@ Usage:
     'basename' corresponds to the app_instance
     'size' is interpreted as number of GB.
     'count' is the number of app_instances to create
+    'numreplicas' is the number of replicas to create
     'template' must refer to an existing template
     'cleanall' applies only to a given 'basename'
     'showall' takes no other args/options
@@ -79,8 +84,14 @@ Usage:
 #
 
 
-def vol_create(api, si, name, size):
-    vol = si.volumes.create(name=name, size=size)
+def vol_create(si, name, args):
+    if args.numreplicas:
+        numreplicas = args.numreplicas
+    else:
+        numreplicas = NUMREPLICAS
+    vol = si.volumes.create(
+        name=name, size=int(args.size),
+        replica_count=int(numreplicas))
     return vol['uuid']
 
 
@@ -102,7 +113,7 @@ def PrintException():
     linecache.checkcache(filename)
     line = linecache.getline(filename, lineno, f.f_globals)
     print 'EXCEPTION IN ({}, LINE {} "{}"): {}'.format(
-           filename, lineno, line.strip(), exc_obj)
+        filename, lineno, line.strip(), exc_obj)
 
 
 def run_cmd(cmd):
@@ -168,7 +179,7 @@ def show_all(api):
                 print "        +ACCESS IP: " + ip
             for v in si.volumes.list():
                 print "        =Volume: {},   Size : {},   UUID : {} ".format(
-                        v['name'], v['size'], v['uuid'])
+                      v['name'], v['size'], v['uuid'])
 
 
 def mkfs(devmnt):
@@ -266,17 +277,32 @@ def nocreds():
 
 def chk_args(args):
 
-    if not args.basename and not (args.showall or args.mpmap or
-                                  args.cleanall):
+    # the only options allowed without basename
+    if not args.basename and not (args.showall or args.mpmap):
+        print "Error: 'showall' and 'mpmap' require 'basename'"
         usage()
 
+    # options required if basename
     if args.basename and not (args.template or args.count or
                               args.cleanall or args.mpmap or args.mkfs):
+        print "Error: Missing required arguments for 'basename'"
         usage()
 
+    # options not allowed with cleanall
     if args.cleanall and (args.size or args.count or args.showall or
                           args.mkfs or args.mpmap or args.dirprefix or
-                          args.chown or args.template):
+                          args.chown or args.template or args.numreplicas):
+        print "Error: 'cleanall' include extraneous options"
+        usage()
+
+    # option combinations required
+    if args.count and not (args.size or args.template):
+        print "Error: 'count' requires 'size' or 'template'"
+        usage()
+
+    # options not allowed together
+    if (args.size or args.numreplicas) and args.template:
+        print "Error: 'size' and 'numreplicas' not allowed with 'template'"
         usage()
 
 
@@ -308,6 +334,8 @@ def main():
     parser.add_argument('--template', action="store", dest="template")
     parser.add_argument('--size', action="store", dest="size")
     parser.add_argument('--count', action="store", dest='count', type=int)
+    parser.add_argument('--numreplicas', action="store", dest='numreplicas',
+                        type=int)
     parser.add_argument('--cleanall', action="store_true")
     parser.add_argument('--showall', action="store_true")
     parser.add_argument('--mkfs', action="store_true")
@@ -402,11 +430,11 @@ def main():
             si = ai.storage_instances.create(name=bname)
             si.acl_policy.initiators.add(ii)
             volname = "{}_vol".format(bname)
-            uuid = vol_create(api, si=si, name=volname, size=int(args.size))
+            uuid = vol_create(si, volname, args)
             print "Created Volume: %s (%s)" % (volname, uuid)
 
-        print "Waiting 10 for storage to come online ..."
-        time.sleep(10)
+        print "Waiting {} for storage to come online ...".format(SLEEP)
+        time.sleep(SLEEP)
         for ai in api.app_instances.list():
             if basename in ai['name']:
                 si = ai.storage_instances.list()[0]
