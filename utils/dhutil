@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python2.7
 """
 
 dhutil:    Datera Host Utility
@@ -16,6 +16,7 @@ Usage:
         --mpmap
         --dirprefix <string>
         --chown <string>
+        --fstype <string>
 
     'basename' corresponds to the app_instance
     'size' is interpreted as number of GB.
@@ -28,6 +29,7 @@ Usage:
     'mpmap' will show the hostside multipath volume mapping
     'dirprefix' specifies a mount point prefix for the volume mount
     'chown' specifies chown:chgrp for the mount point
+    'fstype currently xfs (default) or ext4
 
 """
 import sys
@@ -43,6 +45,8 @@ from dfs_sdk import DateraApi
 
 SLEEP = 10
 NUMREPLICAS = 3
+DISK_BY_PATH = "/dev/disk/by-path"
+SYS_BLOCK = "/sys/block"
 
 
 def usage():
@@ -60,6 +64,7 @@ Usage:
         --mpmap
         --dirprefix <string>
         --chown <string>
+        --fstype <string>
 
     'basename' corresponds to the app_instance
     'size' is interpreted as number of GB.
@@ -72,6 +77,7 @@ Usage:
     'mpmap' will show the hostside multipath volume mapping
     'dirprefix' specifies a mount point prefix for the volume mount
     'chown' specifies chown:chgrp for the mount point
+    'fstype currently xfs (default) or ext4
 
 
 """
@@ -130,23 +136,20 @@ def target_logout(api, node, name):
                             si['access']['iqn'])
 
 
-def discover_targets(node, si, initiator, sleep=SLEEP):
+def target_login(node, si, initiator, sleep=SLEEP):
     # Wait a bit ...
     if sleep != 0:
         print "Wait %s for storage to come online " % sleep
         time.sleep(sleep)
-    print "IQN: " + si['access']['iqn']
+    iqn = si['access']['iqn']
+    print "IQN: " + iqn
     for ip in si['access']['ips']:
         print "IP ADDRS = ", ip
-        cmd = "iscsiadm -m discovery -t sendtargets --portal {}".format(ip)
+        cmd = "iscsiadm -m node -T {} --portal {} --op=new".format(iqn, ip)
         cmd = cmd + " > /dev/null 2>&1"
         run_cmd(cmd)
-
-    # Try logging in to the targets that are accessible
-    for init in si.acl_policy.initiators.list():
-        if init['id'] == initiator:
-            iqn = si['access']['iqn']
-            run_cmd("iscsiadm -m node -T %s -l > /dev/null 2>&1" % iqn)
+        cmd = "iscsiadm -m node -T {} --portal {} -l > /dev/null 2>&1"
+        run_cmd(cmd.format(iqn, ip))
 
 
 def clean_all(api, target):
@@ -163,6 +166,12 @@ def clean_all(api, target):
         initiator.delete()
 
 
+def sn_to_hostname(api, sn):
+    uuid = sn.split("/")[2]
+    sn = api.storage_nodes.get(uuid)
+    return sn['name']
+
+
 def show_all(api):
     for at in api.app_templates.list():
         print "App_Template: " + at['name']
@@ -177,22 +186,51 @@ def show_all(api):
                 print "        +IQN: " + si['access']['iqn']
             for ip in si['access']['ips']:
                 print "        +ACCESS IP: " + ip
+            for sn in si['active_storage_nodes']:
+                print "        +ACTIVE_STORAGE_NODES: " + sn_to_hostname(
+                      api, sn)
             for v in si.volumes.list():
                 print "        =Volume: {},   Size : {},   UUID : {} ".format(
-                      v['name'], v['size'], v['uuid'])
+                    v['name'], v['size'], v['uuid'])
 
 
-def mkfs(devmnt):
-    cmd = "mkfs.ext4 {} ; mkdir -p /{}; mount {} /{}".format(
-        devmnt[0], devmnt[1], devmnt[0], devmnt[1])
+# [0] = dmpath, [1] = mntpoint, [2] = cmdargs
+def mkfs(args):
+    if args[2].fstype == "ext4":
+        cmd = "mkfs.ext4 {} ; mkdir -p /{}; mount {} /{}".format(
+            args[0], args[1], args[0], args[1])
+    else:
+        cmd = "mkfs.xfs {} ; mkdir -p /{}; mount {} /{}".format(
+            args[0], args[1], args[0], args[1])
     print cmd
     os.system(cmd)
-    if devmnt[3]:
-        os.system("chown -R {} /{}".format(devmnt[3], devmnt[1]))
+    if args[2].chown:
+        os.system("chown -R {} /{}".format(args[2].chown, args[1]))
 
 
-def mpmap(api, dirprefix, chown, basename, domkfs):
+def iqn_to_sd(iqn):
+    for f in os.listdir(DISK_BY_PATH):
+        if iqn in f:
+            return os.path.basename(
+                os.readlink(DISK_BY_PATH + "/" + f))
 
+
+def sd_to_dm(sd):
+    for f in os.listdir(SYS_BLOCK):
+        t = "{}/{}/slaves/{}".format(SYS_BLOCK, f, sd)
+        if os.path.islink(t):
+            return f
+
+
+def dm_to_mapper(dm):
+    fname = "{}/{}/dm/name".format(SYS_BLOCK, dm)
+    with open(fname, 'r') as f:
+        mapper = f.read().strip()
+    f.closed
+    return mapper
+
+
+def mpmap(api, args):
     dist = platform.dist()[0]
     map = {}
     mntmap = []
@@ -200,53 +238,36 @@ def mpmap(api, dirprefix, chown, basename, domkfs):
     for ai in api.app_instances.list():
         for si in ai.storage_instances.list():
             for v in si.volumes.list():
-                if not basename or basename in ai['name']:
-                    id = re.sub(r'-', r'', v['uuid'])
-                    mid = id[:25]
-                    map[mid] = {'aname': ai['name'], 'sname': si['name'],
-                                'vname': v['name'], 'id': id}
+                id = v['uuid']
+                if not args.basename or args.basename in ai['name']:
+                    map[id] = {'aname': ai['name'], 'sname': si['name'],
+                               'vname': v['name'], 'id': id}
                     if 'iqn' in si['access']:
-                        map[mid]['iqn'] = si['access']['iqn']
+                        map[id]['iqn'] = si['access']['iqn']
 
-    os.system("multipath -v2 > /dev/null 2>&1")
-    for line in os.popen("multipath -ll | grep DATERA"):
-        #
-        # "Ubuntu" form:
-        #    360014052fe62c362fb84253a562a8add dm-56 DATERA,IBLOCK
-        # 'centos' form:
-        #    mpathe (36001405bcbca70467fb45c9a34fc2554) dm-5 DATERA,IBLOCK
-        #
-        if dist == "Ubuntu":
-            lunid, dm, junk = line.split()
-            mlunid = lunid[8:]
-        elif dist == "centos":
-            junk, lunid, dm, junk, junk = line.split()
-            foo = re.sub(r'[()]', r'', lunid)
-            mlunid = foo[8:]
-        else:
-            print "Can't deal with Distro: ", dist
-            sys.exit(-1)
-        if mlunid in map:
-            dev = "/dev/" + dm
-            print "HOST: {}   lunid: {}  DATERA: {}/{}/{}   IQN: {}".format(
-                dev, lunid, map[mlunid]['aname'], map[mlunid]['sname'],
-                map[mlunid]['vname'], map[mlunid]['iqn'])
-            if domkfs:
-                # ASSUME single storage instance.  mntpoint = appinst + volname
-                # mntpoint = map[mlunid]['aname'] + '-' + map[mlunid]['vname']
-                mntpoint = map[mlunid]['aname']
-                # Delete the hostname/initiator prefix (e.g. "tlx102")
-                # mntpoint = re.sub (r'^[^_]*_', "", map[mlunid]['name'])
-                # Change any remaining '_' to '-'
-                mntpoint = re.sub(r'_', "-", mntpoint)
-                if dirprefix:
-                    mntpoint = dirprefix + "/" + mntpoint
-                if chown:
-                    mntmap.append([dev, mntpoint, lunid, chown])
-                else:
-                    mntmap.append([dev, mntpoint, lunid, None])
+    for m in map:
+        sd = iqn_to_sd(map[m]['iqn'])
+        if sd:
+            dm = sd_to_dm(sd)
+            mapper = dm_to_mapper(dm)
+            dmpath = "/dev/mapper/" + mapper
+            str = "HOST-DM: {}"
+            str += "   DATERA: {}/{}/{}   IQN: {}   "
+            str += "MAPPER: /dev/mapper/{}"
+            print str.format(
+                dm, map[m]['aname'], map[m]['sname'],
+                map[m]['vname'], map[m]['iqn'], dm_to_mapper(dm))
 
-    if domkfs:
+            if args.mkfs:
+                    # ASSUME "singleton" 1:1:1 (app_inst:storage_inst:vol)
+                    mntpoint = map[m]['aname']
+                    # Change any remaining '_' to '-'
+                    mntpoint = re.sub(r'_', "-", mntpoint)
+                    if args.dirprefix:
+                        mntpoint = args.dirprefix + "/" + mntpoint
+                    mntmap.append([dmpath, mntpoint, args])
+
+    if args.mkfs:
         pool = mp.Pool()
         list(pool.imap_unordered(mkfs, mntmap))
 
@@ -291,18 +312,27 @@ def chk_args(args):
     # options not allowed with cleanall
     if args.cleanall and (args.size or args.count or args.showall or
                           args.mkfs or args.mpmap or args.dirprefix or
-                          args.chown or args.template or args.numreplicas):
+                          args.chown or args.template or
+                          args.fstype or args.numreplicas):
         print "Error: 'cleanall' include extraneous options"
         usage()
 
     # option combinations required
     if args.count and not (args.size or args.template):
         print "Error: 'count' requires 'size' or 'template'"
+
+    if args.fstype and not args.mkfs:
+        print "Error: 'fstype' requires 'mkfs'"
         usage()
 
     # options not allowed together
     if (args.size or args.numreplicas) and args.template:
         print "Error: 'size' and 'numreplicas' not allowed with 'template'"
+        usage()
+
+    # options with specific required values
+    if args.fstype and args.fstype not in ['ext4', 'xfs']:
+        print "Only 'xfs' and 'ext4' are allowed for fstype"
         usage()
 
 
@@ -342,6 +372,7 @@ def main():
     parser.add_argument('--mpmap', action="store_true")
     parser.add_argument('--dirprefix', action="store", dest='dirprefix')
     parser.add_argument('--chown', action="store", dest='chown')
+    parser.add_argument('--fstype', action="store", dest='fstype')
     args = parser.parse_args()
 
     creds = os.getenv("DTSCREDS")
@@ -378,14 +409,13 @@ def main():
     if args.showall:
         show_all(api)
         if args.mpmap:
-            mpmap(api, args.dirprefix, args.chown, args.basename, args.mkfs)
+            mpmap(api, args)
         sys.exit(0)
 
     if args.mpmap and not args.count:
-        mpmap(api, args.dirprefix, args.chown, args.basename, args.mkfs)
+        mpmap(api, args)
         sys.exit(0)
 
-    # target_logout(api, host, basename)
     cmd = "grep '^InitiatorName' /etc/iscsi/initiatorname.iscsi"
     cmd = cmd + " | sed -e 's/InitiatorName=//'"
     iscsi_initiator = os.popen(cmd).read().strip()
@@ -415,7 +445,7 @@ def main():
             for ai in api.app_instances.list():
                 if args.basename in ai['name']:
                     for si in ai.storage_instances.list():
-                        discover_targets(host, si, iscsi_initiator, sleep=0)
+                        target_login(host, si, iscsi_initiator, sleep=0)
             run_cmd("lsscsi -t")
         else:
             print args.template, " : does not exist!"
@@ -433,17 +463,17 @@ def main():
             uuid = vol_create(si, volname, args)
             print "Created Volume: %s (%s)" % (volname, uuid)
 
-        print "Waiting {} for storage to come online ...".format(SLEEP)
-        time.sleep(SLEEP)
+        print "Waiting 10 for storage to come online ..."
+        time.sleep(10)
         for ai in api.app_instances.list():
             if basename in ai['name']:
                 si = ai.storage_instances.list()[0]
-                discover_targets(host, si, iscsi_initiator, sleep=0)
+                target_login(host, si, iscsi_initiator, sleep=0)
 
         run_cmd("lsscsi -t")
 
     if args.mkfs:
-        mpmap(api, args.dirprefix, args.chown, args.basename, args.mkfs)
+        mpmap(api, args)
 
 
 if __name__ == '__main__':
