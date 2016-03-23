@@ -1,7 +1,7 @@
+# Datera Python SDK
 
 
-Introduction
-------------
+## Introduction
 
 This is Python SDK version 0.1 for the Datera Fabric Services API.
 Download and use of this package implicitly accepts the terms in COPYING
@@ -10,16 +10,16 @@ Users of this package are assumed to have familiarity with the Datera API.
 Details around the API itself are not necessarily covered through this SDK.
 
 
-Installation
-------------
+## Installation
+
 To install:
    git clone https://github.com/Datera/python-sdk.git 
    cd python-sdk
    python setup.py install
 
 
-Managed Objects
----------------
+## Managed Objects
+
 Datera provides an application-driven storage management model, whose goal is to closely align storage 
 with a corresponding application's requirements.
 
@@ -57,8 +57,8 @@ Another way of viewing the managed object hierarchy is as follows:
 				* protection_policy      (i.e. Snapshot schedules)
 	
 
-Endpoints
----------
+## Endpoints
+
 HTTP operations on URL endpoints is the only way to interact with the set of managed objects.
 URL's have the format:
       http://192.168.42.13:7717/v2/<object_class>/[<instance>]/...
@@ -75,8 +75,7 @@ For a full reference documentation of the REST API, please review the Datera RES
 This Python SDK serves as a wrapper around the raw HTTP layer.
 
 
-Using this SDK
--------------
+## Using this SDK
 
 The Datera module is named "dfs_sdk", and the main entry point is called "DateraApi".
 Obtaining an object handle can be done as follows:
@@ -87,8 +86,7 @@ Obtaining an object handle can be done as follows:
 
 
 
-Common Objects, Examples and  Use Cases
----------------------------------------
+## Common Objects, Examples and  Use Cases
 
 Please see the "utils" directory for programming examples that cover the following:
 
@@ -108,8 +106,7 @@ Attribute assignment for 'create', and 'set' methods can be provided as follows:
 		ai.set(admin_state="offline")
 
 
-'dhutil' : Datera Host Utility
-------------------------------
+## 'dhutil' : Datera Host Utility
 
 The 'dhutil' host-utility is provided along with this SDK.
 'dhutil' can be used as both a reference example for using the SDK,
@@ -141,7 +138,7 @@ Extending the functionality is left as an exercise for the reader
 and is strongly encouraged!
 
 
-Reporting Problems
-------------------
+## Reporting Problems
+
 For problems and feedback, please email "support@datera.io"
 
