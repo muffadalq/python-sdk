@@ -299,14 +299,19 @@ def nocreds():
 def chk_args(args):
 
     # the only options allowed without basename
-    if not args.basename and not (args.showall or args.mpmap):
-        print "Error: 'showall' and 'mpmap' require 'basename'"
+    if not args.basename and not args.showall and not args.mpmap:
+        print "ERROR: most options require basename"
+        usage()
+
+    # need at least one of these
+    if not args.basename and not args.showall and not args.mpmap:
+        print "ERROR:  Need atleast 'basename', 'showall' or 'mpmap'"
         usage()
 
     # options required if basename
     if args.basename and not (args.template or args.count or
                               args.cleanall or args.mpmap or args.mkfs):
-        print "Error: Missing required arguments for 'basename'"
+        print "ERROR: Missing required arguments for 'basename'"
         usage()
 
     # options not allowed with cleanall
@@ -314,26 +319,56 @@ def chk_args(args):
                           args.mkfs or args.mpmap or args.dirprefix or
                           args.chown or args.template or
                           args.fstype or args.numreplicas):
-        print "Error: 'cleanall' include extraneous options"
+        print "ERROR: 'cleanall' include extraneous options"
         usage()
 
     # option combinations required
     if args.count and not (args.size or args.template):
-        print "Error: 'count' requires 'size' or 'template'"
+        print "ERROR: 'count' requires 'size' or 'template'"
+        usage()
+
+    if args.template and not args.count:
+        print "ERROR: 'template' requires 'count'"
+        usage()
 
     if args.fstype and not args.mkfs:
-        print "Error: 'fstype' requires 'mkfs'"
+        print "ERROR: 'fstype' requires 'mkfs'"
         usage()
 
     # options not allowed together
     if (args.size or args.numreplicas) and args.template:
-        print "Error: 'size' and 'numreplicas' not allowed with 'template'"
+        print "ERROR: 'size' and 'numreplicas' not allowed with 'template'"
         usage()
 
     # options with specific required values
     if args.fstype and args.fstype not in ['ext4', 'xfs']:
-        print "Only 'xfs' and 'ext4' are allowed for fstype"
+        print "ERROR: Only 'xfs' and 'ext4' are allowed for fstype"
         usage()
+
+def iscsiadm_chk():
+    try:
+        subprocess.check_output(["iscsiadm", "--version"])
+    except OSError as e:
+        print 
+        print "iscsiadm not available."
+        print "Please install :"
+        print "      RH/CentOS: iscsi-initiator-utils"
+        print "      Ubuntu:    open-iscsi"
+        print
+        sys.exit(1)
+
+
+def mpath_chk():
+    try:
+        subprocess.check_output(["multipath", "-v0", ])
+    except OSError as e:
+        print 
+        print "multipath not available."
+        print "Please install :"
+        print "      RH/CentOS: device-mapper-multipath"
+        print "      Ubuntu:    multipath-tools"
+        print
+        sys.exit(1)
 
 
 def dbck():
@@ -359,6 +394,8 @@ def main():
         usage()
 
     dbck()
+    iscsiadm_chk()
+    mpath_chk()
     parser = argparse.ArgumentParser(description='dhutil')
     parser.add_argument('--basename', action="store", dest="basename")
     parser.add_argument('--template', action="store", dest="template")
@@ -382,8 +419,6 @@ def main():
 
     basename = args.basename
 
-    if not basename and not args.showall and not args.mpmap:
-        usage()
     if basename and len(basename) < 3:
         print "Validation Error:  %s : must be at least 3 chars" % basename
         sys.exit(-1)
