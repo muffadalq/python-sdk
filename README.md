@@ -94,29 +94,29 @@ Please see the **utils** directory for programming examples that cover the follo
 Common methods for all objects include **create(), set(), delete(), list()**
 
   1. To create an app_instance with name **FOO**:
-   ```python
+```python
         ai = api.app_instances.create(name="FOO")
-   ```
+```
   2. Looping through objects can be done via **list()**:
-   ```python
+```python
         for ai in api.app_instances.list():
 		    print "AppInstance: ", ai
-   ```
+```
   3. To set a given **app_instance** into an _offline_ state:
-   ```python
+```python
         ai.set(admin_state="offline")
-   ```
+```
   4. To delete a given app_instance:
-   ```python
+```python
         ai.delete()
-   ```
+```
 ## 'dhutil' : Datera Host Utility
 
 The 'dhutil' host-utility is provided along with this SDK.
 'dhutil' can be used as both a reference example for using the SDK,
 as well as providing some common host-side utility.  For example, a given storage/application lifecycle might looks like this:
 
-  1.  Create 5 app_instances named 'mongodev', each with a single 10G volume,
+  1. Create 5 app_instances named 'mongodev', each with a single 10G volume,
 and to perform the host-side iscsi scan and login:
 ```bash
           dhutil --basename mongodev --count 5 --size 10
