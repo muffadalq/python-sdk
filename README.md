@@ -3,10 +3,10 @@
 
 ## Introduction
 
-This is Python SDK version 0.1 for the **Datera** Fabric Services API.  
+This is Python SDK version 0.1 for the **Datera** Fabric Services API.
 Download and use of this package implicitly accepts the terms in COPYING
 
-Users of this package are assumed to have familiarity with the **Datera** API.  
+Users of this package are assumed to have familiarity with the **Datera** API.
 Details around the API itself are not necessarily covered through this SDK.
 
 
@@ -60,15 +60,15 @@ Another way of viewing the managed object hierarchy is as follows:
 
 ## Endpoints
 
-HTTP operations on URL endpoints is the only way to interact with the set of managed objects.   
+HTTP operations on URL endpoints is the only way to interact with the set of managed objects.
 URL's have the format:
 ```bash
-      http://192.168.42.13:7717/v2/<object_class>/[<instance>]/...   
+      http://192.168.42.13:7717/v2/<object_class>/[<instance>]/...
 ```
 where **7717** is the port used to access the API, and "v2" corresponds to an API version control.
 
-Briefly, the REST API supports 4 operations/methods **create (POST), modify (PUT), list (GET), delete (DELETE)**.  
-Any input payload is in JSON format;  any return payload is in JSON format.  
+Briefly, the REST API supports 4 operations/methods **create (POST), modify (PUT), list (GET), delete (DELETE)**.
+Any input payload is in JSON format;  any return payload is in JSON format.
 Login session keys are required within the "header" of any HTTP request.
 Sessions keys have a 15 minute lifetime.
 
@@ -93,56 +93,56 @@ Please see the **utils** directory for programming examples that cover the follo
 
 Common methods for all objects include **create(), set(), delete(), list()**
 
-1.  To create an app_instance with name **FOO**:
-```python
+1. To create an app_instance with name **FOO**:
+   ```python
         ai = api.app_instances.create(name="FOO")
-```
+   ```
 2. Looping through objects can be done via **list()**:
-```python
+   ```python
         for ai in api.app_instances.list():
 		    print "AppInstance: ", ai
-```	    
+   ```
 3. To set a given **app_instance** into an _offline_ state:
-```python
+   ```python
         ai.set(admin_state="offline")
-```
+   ```
 4. To delete a given app_instance:
-```python
+   ```python
         ai.delete()
-```
+   ```
 ## 'dhutil' : Datera Host Utility
 
-The 'dhutil' host-utility is provided along with this SDK.  
-'dhutil' can be used as both a reference example for using the SDK,  
+The 'dhutil' host-utility is provided along with this SDK.
+'dhutil' can be used as both a reference example for using the SDK,
 as well as providing some common host-side utility.  For example, a given storage/application lifecycle might looks like this:
 
 1.  Create 5 app_instances named 'mongodev', each with a single 10G volume,
 and to perform the host-side iscsi scan and login:
-```bash
+    ```bash
           dhutil --basename mongodev --count 5 --size 10
-```
+    ```
 2. View the multipath mapping to the host:
-```bash
-          dhutil --mpmap
-```
+   ```bash
+         dhutil --mpmap
+   ```
 3. Create **xfs** filesystems for the 'mongodb' volumes,
 mount them at '/mnt' and change the permissions to 'mongodb:mongodb':
-```bash
+   ```bash
           dhutil --basename mongodev --mkfs --dirprefix /mnt --chown mongodb:mongodb
-```
+   ```
 4. Completely teardown (unmount, remove directory, iscsi logout, delete app_instances):
-```bash
+   ```bash
           dhutil --basename mongodev --cleanall
-```
+   ```
 Note that steps 1 and 3 could be combined as follows:
-```bash
+   ```bash
           dhutil --basename mongodev --count 5 --size 10 --mkfs --dirprefix /mnt --chown mongodb:mongodb
-```
+   ```
 Or a corresponding "app_template" could be used, if available:
-```bash
+   ```bash
           dhutil --basename mongodev --count 5 --template mongodb ...
-```
-#### Caveats  
+   ```
+#### Caveats
 - **dhutil** presumes a 'singleton' model, whereby an app_instance
     is created with a single storage_instance with a single volume.
     Extending the functionality is left as an exercise for the reader

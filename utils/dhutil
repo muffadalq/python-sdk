@@ -352,8 +352,8 @@ def iscsiadm_chk():
         print 
         print "iscsiadm not available."
         print "Please install :"
-        print "      RH/CentOS: iscsi-initiator-utils"
-        print "      Ubuntu:    open-iscsi"
+        print "      RH/CentOS: 'yum install iscsi-initiator-utils'"
+        print "      Ubuntu:    'apt-get install open-iscsi'"
         print
         sys.exit(1)
 
@@ -365,8 +365,8 @@ def mpath_chk():
         print 
         print "multipath not available."
         print "Please install :"
-        print "      RH/CentOS: device-mapper-multipath"
-        print "      Ubuntu:    multipath-tools"
+        print "      RH/CentOS: 'yum install device-mapper-multipath'"
+        print "      Ubuntu:    'apt-get install multipath-tools'"
         print
         sys.exit(1)
 
