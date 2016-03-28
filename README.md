@@ -93,20 +93,20 @@ Please see the **utils** directory for programming examples that cover the follo
 
 Common methods for all objects include **create(), set(), delete(), list()**
 
-1. To create an app_instance with name **FOO**:
+  1. To create an app_instance with name **FOO**:
    ```python
         ai = api.app_instances.create(name="FOO")
    ```
-2. Looping through objects can be done via **list()**:
+  2. Looping through objects can be done via **list()**:
    ```python
         for ai in api.app_instances.list():
 		    print "AppInstance: ", ai
    ```
-3. To set a given **app_instance** into an _offline_ state:
+  3. To set a given **app_instance** into an _offline_ state:
    ```python
         ai.set(admin_state="offline")
    ```
-4. To delete a given app_instance:
+  4. To delete a given app_instance:
    ```python
         ai.delete()
    ```
@@ -116,24 +116,23 @@ The 'dhutil' host-utility is provided along with this SDK.
 'dhutil' can be used as both a reference example for using the SDK,
 as well as providing some common host-side utility.  For example, a given storage/application lifecycle might looks like this:
 
-1.  Create 5 app_instances named 'mongodev', each with a single 10G volume,
+  1.  Create 5 app_instances named 'mongodev', each with a single 10G volume,
 and to perform the host-side iscsi scan and login:
-    ```bash
+```bash
           dhutil --basename mongodev --count 5 --size 10
-    ```
-2. View the multipath mapping to the host:
-   ```bash
+```
+  2. View the multipath mapping to the host:
+```bash
          dhutil --mpmap
-   ```
-3. Create **xfs** filesystems for the 'mongodb' volumes,
-mount them at '/mnt' and change the permissions to 'mongodb:mongodb':
-   ```bash
+```
+  3. Create **xfs** filesystems for the 'mongodb' volumes,  mount them at '/mnt' and change the permissions to 'mongodb:mongodb':
+```bash
           dhutil --basename mongodev --mkfs --dirprefix /mnt --chown mongodb:mongodb
-   ```
-4. Completely teardown (unmount, remove directory, iscsi logout, delete app_instances):
-   ```bash
+```
+  4. Completely teardown (unmount, remove directory, iscsi logout, delete app_instances):
+```bash
           dhutil --basename mongodev --cleanall
-   ```
+```
 Note that steps 1 and 3 could be combined as follows:
    ```bash
           dhutil --basename mongodev --count 5 --size 10 --mkfs --dirprefix /mnt --chown mongodb:mongodb
