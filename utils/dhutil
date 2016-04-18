@@ -171,6 +171,15 @@ def sn_to_hostname(api, sn):
     sn = api.storage_nodes.get(uuid)
     return sn['name']
 
+def si_to_hostname(api, si):
+    sn_name = 'undef'
+    for sn in si['active_storage_nodes']:
+        uuid = sn.split("/")[2]
+        sn = api.storage_nodes.get(uuid)
+	sn_name = 'undef'
+	sn_name = sn['name']
+    #todo, this only returns the last active server in the list 
+    return sn_name
 
 def show_all(api):
     for at in api.app_templates.list():
@@ -241,7 +250,8 @@ def mpmap(api, args):
                 id = v['uuid']
                 if not args.basename or args.basename in ai['name']:
                     map[id] = {'aname': ai['name'], 'sname': si['name'],
-                               'vname': v['name'], 'id': id}
+                               'vname': v['name'], 'id': id,
+                               'nodename': si_to_hostname(api,si) }
                     if 'iqn' in si['access']:
                         map[id]['iqn'] = si['access']['iqn']
 
@@ -249,14 +259,21 @@ def mpmap(api, args):
         sd = iqn_to_sd(map[m]['iqn'])
         if sd:
             dm = sd_to_dm(sd)
+            if not dm:
+                print "No DM for sd: ", sd
+                sys.exit(-1)
             mapper = dm_to_mapper(dm)
+            if not mapper:
+                print "No mapper entry for dm: ", dm
+                sys.exit(-1)
             dmpath = "/dev/mapper/" + mapper
             str = "HOST-DM: {}"
             str += "   DATERA: {}/{}/{}   IQN: {}   "
-            str += "MAPPER: /dev/mapper/{}"
+            str += "MAPPER: /dev/mapper/{}  NODE:{}"
             print str.format(
                 dm, map[m]['aname'], map[m]['sname'],
-                map[m]['vname'], map[m]['iqn'], dm_to_mapper(dm))
+                map[m]['vname'], map[m]['iqn'], dm_to_mapper(dm),
+                map[m]['nodename'])
 
             if args.mkfs:
                     # ASSUME "singleton" 1:1:1 (app_inst:storage_inst:vol)
