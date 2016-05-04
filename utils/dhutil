@@ -388,6 +388,19 @@ def mpath_chk():
         sys.exit(1)
 
 
+def lsscsi_chk():
+    try:
+        subprocess.check_output(["lsscsi", "-t", ])
+    except OSError as e:
+        print 
+        print "lsscsi not available."
+        print "Please install :"
+        print "      RH/CentOS: 'yum install lsscsi'"
+        print "      Ubuntu:    'apt-get install lsscsi'"
+        print
+        sys.exit(1)
+
+
 def dbck():
     # Check for docker bug: https://github.com/docker/docker/issues/7101"
     try:
@@ -413,6 +426,7 @@ def main():
     dbck()
     iscsiadm_chk()
     mpath_chk()
+    lsscsi_chk()
     parser = argparse.ArgumentParser(description='dhutil')
     parser.add_argument('--basename', action="store", dest="basename")
     parser.add_argument('--template', action="store", dest="template")
