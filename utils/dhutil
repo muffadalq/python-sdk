@@ -127,18 +127,14 @@ def run_cmd(cmd):
     os.system(cmd)
 
 
-def target_logout_and_node_cleanup(api, node, name):
+def target_logout(api, node, name):
     for ai in api.app_instances.list():
         for si in ai.storage_instances.list():
             if name in ai['name']:
-                print si['access']['ips']
                 if 'iqn' in si['access']:
-                    run_cmd("iscsiadm -m node -u -T %s" % si['access']['iqn'])
-                    run_cmd("iscsiadm -m node -T %s --op=delete" % si['access']['iqn'])
-                for ip in si['access']['ips']:
-                    run_cmd("iscsiadm -m discoverydb -t st -p %s:3260 --op=delete" % ip)
-    #restart iscsi
-    run_cmd("systemctl restart iscsi")
+                    run_cmd("iscsiadm -m node -u -T %s" %
+                            si['access']['iqn'])
+
 
 def target_login(node, si, initiator, sleep=SLEEP):
     # Wait a bit ...
@@ -472,7 +468,7 @@ def main():
 
     if args.cleanall:
         unmount(args.basename)
-        target_logout_and_node_cleanup(api, host, basename)
+        target_logout(api, host, basename)
         clean_all(api, basename)
         sys.exit(0)
 
