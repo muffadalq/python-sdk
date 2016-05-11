@@ -123,6 +123,23 @@ class Endpoint(object):
         subendpoint_name = klass._name
         setattr(self, subendpoint_name, subendpoint)
 
+    def _set_subendpoint_as_endpoint(self, klass):
+        """ Create a endpoint of given sub-endpoint type
+
+        If subendpoint level supports some operation (GET, POST etc) but there
+        is no operation allowed on endpoint level then set the subendpoint as
+        endpoint.
+
+        e.g. Endpoint /init does not support any read or write operation but
+             SubEndpoint /init/config supports read (GET) operation. Hence
+             setting init_config (replacing "/" by "_") as a endpoint object.
+        """
+        assert(issubclass(klass, Endpoint))
+        subendpoint = klass(self._context, self._path)
+        subendpoint = self._context.prepare_endpoint(subendpoint)
+        subendpoint_name = klass._name.strip('/').replace('/', '_')
+        setattr(self, subendpoint_name, subendpoint)
+
     def _get_list(self, _path, data):
         """ Returns a list of objects or strings, depending on the endpoint """
         if isinstance(data, list):
@@ -319,5 +336,18 @@ class MetricEndpoint(Endpoint):
     """
     pass
 
+
+class MonitoringStatusEndpoint(Endpoint):
+    """ Returns a list of dictionaries to check the status of monitor's health
+        and the system.
+        e.g. /system/health
+            /system/storage_status
+            /system/volume_status
+    """
+
+    def get(self, **params):
+        path = self._path
+        data = self._connection.read_endpoint(path, params)
+        return data
 
 ###############################################################################

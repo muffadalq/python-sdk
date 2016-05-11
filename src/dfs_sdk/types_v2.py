@@ -13,6 +13,7 @@ from .base import StringEndpoint as _StringEndpoint
 from .base import MetricCollectionEndpoint as _MetricCollectionEndpoint
 from .base import MetricEndpoint as _MetricEndpoint
 from .base import Entity as _Entity
+from .base import MonitoringStatusEndpoint as _MonitoringStatusEndpoint
 
 
 ##################################################################
@@ -250,7 +251,6 @@ class AccessNetworks(_Entity):
     def __init__(self, *args):
         super(AccessNetworks, self).__init__(*args)
 
-
 class AccessVip(_Entity):
 
     def __init__(self, *args):
@@ -272,6 +272,12 @@ class InternalNetwork(_Entity):
         self._set_subendpoint(InternalNetworkInterfacesEp)
 
 
+class NetworkMapping(_Entity):
+
+    def __init__(self, *args):
+        super(NetworkMapping, self).__init__(*args)
+
+
 class Network(_Entity):
 
     def __init__(self, *args):
@@ -280,6 +286,7 @@ class Network(_Entity):
         self._set_subendpoint(AccessVipEp)
         self._set_subendpoint(MgmtVipEp)
         self._set_subendpoint(InternalNetworkEp)
+        self._set_subendpoint(NetworkMappingEp)
 
 
 class System(_Entity):
@@ -291,6 +298,9 @@ class System(_Entity):
         self._set_subendpoint(NtpServersEp)
         self._set_subendpoint(HttpProxyEp)
         self._set_subendpoint(SystemMetricsEp)
+        self._set_subendpoint(HealthStatusEp)
+        self._set_subendpoint(StorageStatusEp)
+        self._set_subendpoint(VolumeStatusEp)
 
 
 class AclPolicy(_Entity):
@@ -351,6 +361,21 @@ class UpgradeAvailable(_Entity):
     pass
 
 
+class HealthStatus(_Entity):
+    def __init__(self, *args):
+        super(HealthStatus, self).__init__(*args)
+
+
+class StorageStatus(_Entity):
+    def __init__(self, *args):
+        super(StorageStatus, self).__init__(*args)
+
+
+class VolumeStatus(_Entity):
+    def __init__(self, *args):
+        super(VolumeStatus, self).__init__(*args)
+
+
 ###############################################################################
 #
 #  SingletonEndpoint classes
@@ -366,6 +391,9 @@ class SystemEp(_SingletonEndpoint):
         self._set_subendpoint(NetworkEp)
         self._set_subendpoint(NtpServersEp)
         self._set_subendpoint(HttpProxyEp)
+        self._set_subendpoint(HealthStatusEp)
+        self._set_subendpoint(StorageStatusEp)
+        self._set_subendpoint(VolumeStatusEp)
 
 
 class ApiEp(_SingletonEndpoint):
@@ -471,6 +499,7 @@ class NetworkEp(_SingletonEndpoint):
         self._set_subendpoint(AccessVipEp)
         self._set_subendpoint(MgmtVipEp)
         self._set_subendpoint(InternalNetworkEp)
+        self._set_subendpoint(NetworkMappingEp)
 
 
 class PerformancePolicyEp(_SingletonEndpoint):
@@ -516,6 +545,13 @@ class AccessNetworkIpPoolsEp(_ContainerEndpoint):
         self._set_subendpoint(NetworkPathsEp)
 
 
+class NetworkMappingEp(_ListEndpoint):
+    _name = "mapping"
+    _entity_cls = NetworkMapping
+
+    def __init__(self, *args):
+        super(NetworkMappingEp, self).__init__(*args)
+
 ###############################################################################
 #
 #  ContainerEndpoint classes
@@ -533,6 +569,21 @@ class UpgradeEp(_SingletonEndpoint):
 class UpgradeAvailableEp(_ContainerEndpoint):
     _name = "available"
     _entity_cls = UpgradeAvailable
+
+
+class HealthStatusEp(_MonitoringStatusEndpoint):
+    _name = "health"
+    _entity_cls = HealthStatus
+
+
+class StorageStatusEp(_MonitoringStatusEndpoint):
+    _name = "storage_status"
+    _entity_cls = StorageStatus
+
+
+class VolumeStatusEp(_MonitoringStatusEndpoint):
+    _name = "volume_status"
+    _entity_cls = VolumeStatus
 
 
 class AppInstancesEp(_ContainerEndpoint):
@@ -581,6 +632,13 @@ class StorageNodesEp(_ContainerEndpoint):
 
     def __init__(self, *args):
         super(StorageNodesEp, self).__init__(*args)
+
+    def set(self, **params):
+        """
+        Modifies the entity
+        """
+        data = self._connection.update_endpoint(self._path, params)
+        return self._new_contained_entity(data)
 
 
 class StorageTemplatesEp(_ContainerEndpoint):
@@ -1057,6 +1115,10 @@ class TimeEp(_StringEndpoint):
 
 ###############################################################################
 
+class InitConfig(_StringEndpoint):
+    _name = 'init/config'
+
+###############################################################################
 
 class RootEp(_Endpoint):
     """
@@ -1082,6 +1144,7 @@ class RootEp(_Endpoint):
         self._set_subendpoint(UsersEp)
         self._set_subendpoint(UpgradeEp)
         self._set_subendpoint(TimeEp)
+        self._set_subendpoint_as_endpoint(InitConfig) # For details about usage of this method please check the docstring
 
 
 ###############################################################################
