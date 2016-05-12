@@ -137,7 +137,11 @@ def target_logout_and_node_cleanup(api, node, name):
                     run_cmd("iscsiadm -m node -T %s --op=delete" % si['access']['iqn'])
                 for ip in si['access']['ips']:
                     run_cmd("iscsiadm -m discoverydb -t st -p %s:3260 --op=delete" % ip)
-    #restart iscsi
+
+    #handling special cases. Will have to be built over time.
+    if platform.dist()[0] == 'Ubuntu':
+       if platform.dist()[1] == '14.04':
+          run_cmd("service open-iscsi restart")
     run_cmd("systemctl restart iscsi")
 
 def target_login(node, si, initiator, sleep=SLEEP):
