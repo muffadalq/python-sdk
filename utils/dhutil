@@ -142,7 +142,8 @@ def target_logout_and_node_cleanup(api, node, name):
     if platform.dist()[0] == 'Ubuntu':
        if platform.dist()[1] == '14.04':
           run_cmd("service open-iscsi restart")
-    run_cmd("systemctl restart iscsi")
+    else:
+       run_cmd("systemctl restart iscsi")
 
 def target_login(node, si, initiator, sleep=SLEEP):
     # Wait a bit ...
