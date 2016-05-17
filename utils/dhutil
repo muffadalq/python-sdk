@@ -17,6 +17,7 @@ Usage:
         --dirprefix <string>
         --chown <string>
         --fstype <string>
+        --createfiofiles
 
     'basename' corresponds to the app_instance
     'size' is interpreted as number of GB.
@@ -30,6 +31,7 @@ Usage:
     'dirprefix' specifies a mount point prefix for the volume mount
     'chown' specifies chown:chgrp for the mount point
     'fstype currently xfs (default) or ext4
+    'createfiofiles' creates sample fio files for each volume
 
 """
 import sys
@@ -65,6 +67,7 @@ Usage:
         --dirprefix <string>
         --chown <string>
         --fstype <string>
+        --createfiofiles
 
     'basename' corresponds to the app_instance
     'size' is interpreted as number of GB.
@@ -78,6 +81,7 @@ Usage:
     'dirprefix' specifies a mount point prefix for the volume mount
     'chown' specifies chown:chgrp for the mount point
     'fstype currently xfs (default) or ext4
+    'createfiofiles' creates sample fio files for each volume
 
 
 """
@@ -269,20 +273,21 @@ def mpmap(api, args):
         if sd:
             dm = sd_to_dm(sd)
             if not dm:
-                print "No DM for sd: ", sd
+                print "No DM for sd: ", sd + ". Please make sure that multipath service is running. Then cleanall and retry"
                 sys.exit(-1)
             mapper = dm_to_mapper(dm)
             if not mapper:
-                print "No mapper entry for dm: ", dm
+                print "No mapper entry for dm: ", dm + ". Please make sure that multipath service is running. Then cleanall and retry"
                 sys.exit(-1)
             dmpath = "/dev/mapper/" + mapper
             str = "HOST-DM: {}"
             str += "   DATERA: {}/{}/{}   IQN: {}   "
             str += "MAPPER: /dev/mapper/{}  NODE:{}"
-            print str.format(
+            dm_map = str.format(
                 dm, map[m]['aname'], map[m]['sname'],
                 map[m]['vname'], map[m]['iqn'], dm_to_mapper(dm),
                 map[m]['nodename'])
+            print dm_map
 
             if args.mkfs:
                     # ASSUME "singleton" 1:1:1 (app_inst:storage_inst:vol)
@@ -294,9 +299,53 @@ def mpmap(api, args):
                     mntmap.append([dmpath, mntpoint, args])
 
     if args.mkfs:
-        pool = mp.Pool()
-        list(pool.imap_unordered(mkfs, mntmap))
+#        pool = mp.Pool()
+#        list(pool.imap_unordered(mkfs, mntmap))
+        return mntmap
+    else:
+       return map
 
+def create_fio_template():
+    with open('fiotemplate','w') as f:
+       lines = ["[global]","randrepeat=0","ioengine=libaio","iodepth=2","direct=1","numjobs=2","size=1G","runtime=3600","group_reporting","time_based"]
+       try:
+          for line in lines:
+             f.write(line + '\n')
+       finally:
+          f.close()
+
+def create_fio_files(api,args):
+
+    fio = {'fio_randread':{'rw':'randread', 'blocksize':'4k'},
+           'fio_seqread':{'rw':'read', 'blocksize':'1m'},
+           'fio_randwrite':{'rw':'randwrite', 'blocksize':'4k'},
+           'fio_seqwrite':{'rw':'write', 'blocksize':'1m'}
+          }
+
+    create_fio_template()
+    mntmap = mpmap(api,args)
+
+    try:
+       for key,item in fio.items():
+          with open('fiotemplate', 'r') as f:
+             with open(key, 'w') as key:
+                for line in f:
+                   key.write(line)
+                for param in item:
+                   key.write(param + "=" + item[param] + '\n')
+                if args.mkfs:
+                   for index in range(len(mntmap)):
+                      key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
+                      key.write("directory=/" + mntmap[index][1] + '\n')
+                else:
+                    for id in mntmap:
+                       key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
+                       sd = iqn_to_sd(mntmap[id]['iqn'])
+                       if sd:
+                          dm = sd_to_dm(sd)
+                          key.write("filename=/dev/" + dm + '\n')
+    finally:
+       f.close()
 
 def chktempl(api, templ):
     for at in api.app_templates.list():
@@ -439,6 +488,7 @@ def main():
     parser = argparse.ArgumentParser(description='dhutil')
     parser.add_argument('--basename', action="store", dest="basename")
     parser.add_argument('--template', action="store", dest="template")
+    parser.add_argument('--createfiofiles', action="store_true")
     parser.add_argument('--size', action="store", dest="size")
     parser.add_argument('--count', action="store", dest='count', type=int)
     parser.add_argument('--numreplicas', action="store", dest='numreplicas',
@@ -548,8 +598,12 @@ def main():
         run_cmd("lsscsi -t")
 
     if args.mkfs:
-        mpmap(api, args)
-
+        mntmap = mpmap(api, args)
+        pool = mp.Pool()
+        list(pool.imap_unordered(mkfs, mntmap))
+ 
+    if args.createfiofiles:
+        create_fio_files(api,args)
 
 if __name__ == '__main__':
     main()
