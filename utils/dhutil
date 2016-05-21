@@ -17,6 +17,9 @@ Usage:
         --dirprefix <string>
         --chown <string>
         --fstype <string>
+        --createfiofiles
+        --volsnap  <RETCOUNT> <SNAPINTERVAL>
+        --volperf  <TOTAL_IOPS_MAX> <TOTAL_BANDWIDTH_MAX>
 
     'basename' corresponds to the app_instance
     'size' is interpreted as number of GB.
@@ -30,6 +33,9 @@ Usage:
     'dirprefix' specifies a mount point prefix for the volume mount
     'chown' specifies chown:chgrp for the mount point
     'fstype currently xfs (default) or ext4
+    'createfiofiles' creates sample fio files for each volume
+    'volsnap' specifies snapshot retention count and interval
+    'volperf' volume-level total max iops and bandwidth
 
 """
 import sys
@@ -65,6 +71,9 @@ Usage:
         --dirprefix <string>
         --chown <string>
         --fstype <string>
+        --createfiofiles
+        --volsnap  <RETCOUNT> <SNAPINTERVAL>
+        --volperf  <TOTAL_IOPS_MAX> <TOTAL_BANDWIDTH_MAX>
 
     'basename' corresponds to the app_instance
     'size' is interpreted as number of GB.
@@ -78,6 +87,9 @@ Usage:
     'dirprefix' specifies a mount point prefix for the volume mount
     'chown' specifies chown:chgrp for the mount point
     'fstype currently xfs (default) or ext4
+    'createfiofiles' creates sample fio files for each volume
+    'volsnap' specifies snapshot retention count and interval(15min, 1hour, 1day, 1month, 1year)
+    'volperf' volume-level total max iops and bandwidth(KBps)
 
 
 """
@@ -98,6 +110,14 @@ def vol_create(si, name, args):
     vol = si.volumes.create(
         name=name, size=int(args.size),
         replica_count=int(numreplicas))
+    if args.volsnap:
+       vol.snapshot_policies.create(
+         name=name, retention_count=int(args.volsnap[0]),
+         interval=args.volsnap[1])
+    if args.volperf:
+       vol.performance_policy.create(
+         total_iops_max = int(args.volperf[0]), 
+         total_bandwidth_max = int(args.volperf[1]))
     return vol['uuid']
 
 
@@ -226,7 +246,7 @@ def mkfs(args):
         os.system("chown -R {} /{}".format(args[2].chown, args[1]))
 
 
-def iqn_to_sd(iqn):
+def iqn_to_sd(args,iqn):
     for f in os.listdir(DISK_BY_PATH):
         if iqn in f:
             return os.path.basename(
@@ -265,24 +285,28 @@ def mpmap(api, args):
                         map[id]['iqn'] = si['access']['iqn']
 
     for m in map:
-        sd = iqn_to_sd(map[m]['iqn'])
+        if args.volperf:
+            print "Sleeping 3s for target to be discovered"
+        time.sleep(3)
+        sd = iqn_to_sd(args,map[m]['iqn'])
         if sd:
             dm = sd_to_dm(sd)
             if not dm:
-                print "No DM for sd: ", sd
+                print "No DM for sd: ", sd + ". Please make sure that multipath service is running. Then cleanall and retry"
                 sys.exit(-1)
             mapper = dm_to_mapper(dm)
             if not mapper:
-                print "No mapper entry for dm: ", dm
+                print "No mapper entry for dm: ", dm + ". Please make sure that multipath service is running. Then cleanall and retry"
                 sys.exit(-1)
             dmpath = "/dev/mapper/" + mapper
             str = "HOST-DM: {}"
             str += "   DATERA: {}/{}/{}   IQN: {}   "
             str += "MAPPER: /dev/mapper/{}  NODE:{}"
-            print str.format(
+            dm_map = str.format(
                 dm, map[m]['aname'], map[m]['sname'],
                 map[m]['vname'], map[m]['iqn'], dm_to_mapper(dm),
                 map[m]['nodename'])
+            print dm_map
 
             if args.mkfs:
                     # ASSUME "singleton" 1:1:1 (app_inst:storage_inst:vol)
@@ -294,9 +318,49 @@ def mpmap(api, args):
                     mntmap.append([dmpath, mntpoint, args])
 
     if args.mkfs:
-        pool = mp.Pool()
-        list(pool.imap_unordered(mkfs, mntmap))
+#        pool = mp.Pool()
+#        list(pool.imap_unordered(mkfs, mntmap))
+        return mntmap
+    else:
+       return map
 
+def create_fio_template():
+    with open('fiotemplate','w') as f:
+       lines = ["[global]","randrepeat=0","ioengine=libaio","iodepth=2","direct=1","numjobs=2","runtime=3600","group_reporting","time_based"]
+       for line in lines:
+          f.write(line + '\n')
+
+def create_fio_files(api,args):
+
+    fio = {'fio_randread':{'rw':'randread', 'blocksize':'4k'},
+           'fio_seqread':{'rw':'read', 'blocksize':'1m'},
+           'fio_randwrite':{'rw':'randwrite', 'blocksize':'4k'},
+           'fio_seqwrite':{'rw':'write', 'blocksize':'1m'}
+          }
+
+    create_fio_template()
+    mntmap = mpmap(api,args)
+
+    for key,item in fio.items():
+       with open('fiotemplate', 'r') as f:
+          with open(key, 'w') as key:
+             for line in f:
+                key.write(line)
+             for param in item:
+                key.write(param + "=" + item[param] + '\n')
+             if args.mkfs:
+                for index in range(len(mntmap)):
+                   key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
+                   key.write("directory=/" + mntmap[index][1] + '\n')
+                   key.write("size=100%" + '\n')
+             else:
+                 for id in mntmap:
+                    key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
+                    sd = iqn_to_sd(args, mntmap[id]['iqn'])
+                    if sd:
+                       dm = sd_to_dm(sd)
+                       key.write("filename=/dev/" + dm + '\n')
+                       key.write("size=100%" + '\n')
 
 def chktempl(api, templ):
     for at in api.app_templates.list():
@@ -370,6 +434,15 @@ def chk_args(args):
     if args.fstype and args.fstype not in ['ext4', 'xfs']:
         print "ERROR: Only 'xfs' and 'ext4' are allowed for fstype"
         usage()
+    
+    if args.volsnap:
+       if args.volsnap[0].isdigit() == False:
+          print "ERROR: RETCOUNT must be an integer"
+          usage()
+       if args.volsnap[1] not in ('15min','1hour','1day','1week','1month','1year'):
+          print "ERROR: INTERVAL must be '15min' or '1hour' or '1day' or '1week' or '1month' or '1year'"
+          usage()
+    
 
 def iscsiadm_chk():
     try:
@@ -439,6 +512,7 @@ def main():
     parser = argparse.ArgumentParser(description='dhutil')
     parser.add_argument('--basename', action="store", dest="basename")
     parser.add_argument('--template', action="store", dest="template")
+    parser.add_argument('--createfiofiles', action="store_true")
     parser.add_argument('--size', action="store", dest="size")
     parser.add_argument('--count', action="store", dest='count', type=int)
     parser.add_argument('--numreplicas', action="store", dest='numreplicas',
@@ -450,6 +524,11 @@ def main():
     parser.add_argument('--dirprefix', action="store", dest='dirprefix')
     parser.add_argument('--chown', action="store", dest='chown')
     parser.add_argument('--fstype', action="store", dest='fstype')
+    parser.add_argument('--volsnap', action="store", dest="volsnap", nargs=2, 
+                       metavar=('RETCOUNT','INTERVAL'),help='volume-level snapshot retention count and interval')
+    parser.add_argument('--volperf', action="store", dest="volperf", nargs=2, 
+                       metavar=('TOTAL_IOPS_MAX','TOTAL_BANDWIDTH_MAX[KBps]'), type=int, 
+                       help='volume-level iops and bandwidth policies')
     args = parser.parse_args()
 
     creds = os.getenv("DTSCREDS")
@@ -548,8 +627,12 @@ def main():
         run_cmd("lsscsi -t")
 
     if args.mkfs:
-        mpmap(api, args)
-
+        mntmap = mpmap(api, args)
+        pool = mp.Pool()
+        list(pool.imap_unordered(mkfs, mntmap))
+ 
+    if args.createfiofiles:
+        create_fio_files(api,args)
 
 if __name__ == '__main__':
     main()
