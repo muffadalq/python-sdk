@@ -335,7 +335,7 @@ def create_fio_files(api,args):
     fio = {'fio_randread':{'rw':'randread', 'blocksize':'4k'},
            'fio_seqread':{'rw':'read', 'blocksize':'1m'},
            'fio_randwrite':{'rw':'randwrite', 'blocksize':'4k'},
-           'fio_seqwrite':{'rw':'write', 'blocksize':'1m'},
+           'fio_seqwrite':{'rw':'write', 'blocksize':'1m'}
            'fio_randreadwrite':{'rw':'randrw', 'rwmixread': '70', 'blocksize':'4k'}
           }
 
@@ -374,9 +374,6 @@ def unmount(name):
     cmd = "mount |grep %s | awk '{print $3}'" % name
     for l in os.popen(cmd).readlines():
         line = l.rstrip()
-        if line == "/":
-            print "skipping unmount of /"
-            return None
         p = os.path.basename(line)
         run_cmd("umount %s" % line)
         run_cmd("rm -rf %s" % line)
