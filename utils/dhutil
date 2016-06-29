@@ -374,6 +374,9 @@ def unmount(name):
     cmd = "mount |grep %s | awk '{print $3}'" % name
     for l in os.popen(cmd).readlines():
         line = l.rstrip()
+         if line == "/":
+            print "skipping unmount of /"
+            return None
         p = os.path.basename(line)
         run_cmd("umount %s" % line)
         run_cmd("rm -rf %s" % line)
