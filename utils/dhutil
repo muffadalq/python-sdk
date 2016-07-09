@@ -158,12 +158,14 @@ def target_logout_and_node_cleanup(api, node, name):
                 for ip in si['access']['ips']:
                     run_cmd("iscsiadm -m discoverydb -t st -p %s:3260 --op=delete" % ip)
 
-    #handling special cases. Will have to be built over time.
+    #Ubuntu and debian
     if platform.dist()[0] == 'Ubuntu':
-       if platform.dist()[1] == '14.04':
-          run_cmd("service open-iscsi restart")
+           run_cmd("iscsiadm -m session --rescan")
+           run_cmd("service multipath-tools reload")
+    #rhel, centos, sles
     else:
-       run_cmd("systemctl restart iscsi")
+       run_cmd("iscsiadm -m session --rescan")
+       run_cmd("service multipathd reload")
 
 def target_login(node, si, initiator, sleep=SLEEP):
     # Wait a bit ...
@@ -374,9 +376,9 @@ def unmount(name):
     cmd = "mount |grep %s | awk '{print $3}'" % name
     for l in os.popen(cmd).readlines():
         line = l.rstrip()
-         if line == "/":
-            print "skipping unmount of /"
-            return None
+        if line == "/":
+           print "skipping unmount of /"
+           return None
         p = os.path.basename(line)
         run_cmd("umount %s" % line)
         run_cmd("rm -rf %s" % line)
