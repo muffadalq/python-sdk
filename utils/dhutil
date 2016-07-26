@@ -327,25 +327,25 @@ def mpmap(api, args):
        return map
 
 def create_fio_template():
-    with open('fiotemplate','w') as f:
+    with open('fiotemplate.fio','w') as f:
        lines = ["[global]","randrepeat=0","ioengine=libaio","iodepth=16","direct=1","numjobs=4","runtime=3600","group_reporting","time_based"]
        for line in lines:
           f.write(line + '\n')
 
 def create_fio_files(api,args):
 
-    fio = {'fio_randread':{'rw':'randread', 'blocksize':'4k'},
-           'fio_seqread':{'rw':'read', 'blocksize':'1m'},
-           'fio_randwrite':{'rw':'randwrite', 'blocksize':'4k'},
-           'fio_seqwrite':{'rw':'write', 'blocksize':'1m'},
-           'fio_randreadwrite':{'rw':'randrw', 'rwmixread': '70', 'blocksize':'4k'}
+    fio = {args.basename + '_randread.fio':{'rw':'randread', 'blocksize':'4k'},
+           args.basename + '_seqread.fio':{'rw':'read', 'blocksize':'1m'},
+           args.basename + '_randwrite.fio':{'rw':'randwrite', 'blocksize':'4k'},
+           args.basename + '_seqwrite.fio':{'rw':'write', 'blocksize':'1m'},
+           args.basename + '_randreadwrite.fio':{'rw':'randrw', 'rwmixread': '70', 'blocksize':'4k'}
           }
 
     create_fio_template()
     mntmap = mpmap(api,args)
 
     for key,item in fio.items():
-       with open('fiotemplate', 'r') as f:
+       with open('fiotemplate.fio', 'r') as f:
           with open(key, 'w') as key:
              for line in f:
                 key.write(line)
@@ -353,12 +353,14 @@ def create_fio_files(api,args):
                 key.write(param + "=" + item[param] + '\n')
              if args.mkfs:
                 for index in range(len(mntmap)):
-                   key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
+                   #key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
+                   key.write("[fiofile]" + '\n')
                    key.write("directory=/" + mntmap[index][1] + '\n')
                    key.write("size=100%" + '\n')
              else:
                  for id in mntmap:
-                    key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
+                    #key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
+                    key.write("[fiofile]" + '\n')
                     sd = iqn_to_sd(args, mntmap[id]['iqn'])
                     if sd:
                        dm = sd_to_dm(sd)
@@ -382,6 +384,8 @@ def unmount(name):
         p = os.path.basename(line)
         run_cmd("umount %s" % line)
         run_cmd("rm -rf %s" % line)
+     # cleanup fio files
+    run_cmd("rm -rf *.fio")
 
 
 def nocreds():
