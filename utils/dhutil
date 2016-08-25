@@ -18,8 +18,9 @@ Usage:
         --chown <string>
         --fstype <string>
         --createfio
-        --volsnap  <RETCOUNT> <SNAPINTERVAL>
+        --snappol  <RETCOUNT> <SNAPINTERVAL>
         --volperf  <TOTAL_IOPS_MAX> <TOTAL_BANDWIDTH_MAX>
+        --clone <APP_INSTANCE_NAME> 
 
     'basename' corresponds to the app_instance
     'size' is interpreted as number of GB.
@@ -34,8 +35,9 @@ Usage:
     'chown' specifies chown:chgrp for the mount point
     'fstype currently xfs (default) or ext4
     'createfio' creates sample fio files for each volume
-    'volsnap' specifies snapshot retention count and interval
+    'snappol' specifies snapshot retention count and interval
     'volperf' volume-level total max iops and bandwidth
+    'clone' clone a specified application instance
 
 """
 import sys
@@ -53,6 +55,7 @@ SLEEP = 10
 NUMREPLICAS = 3
 DISK_BY_PATH = "/dev/disk/by-path"
 SYS_BLOCK = "/sys/block"
+CLONE_AI_LIST = []
 
 
 def usage():
@@ -72,8 +75,9 @@ Usage:
         --chown <string>
         --fstype <string>
         --createfio
-        --volsnap  <RETCOUNT> <SNAPINTERVAL>
+        --snappol  <RETCOUNT> <SNAPINTERVAL>
         --volperf  <TOTAL_IOPS_MAX> <TOTAL_BANDWIDTH_MAX>
+        --clone <APP_INSTANCE_NAME> 
 
     'basename' corresponds to the app_instance
     'size' is interpreted as number of GB.
@@ -88,8 +92,9 @@ Usage:
     'chown' specifies chown:chgrp for the mount point
     'fstype currently xfs (default) or ext4
     'createfio' creates sample fio files for each volume
-    'volsnap' specifies snapshot retention count and interval(15min, 1hour, 1day, 1month, 1year)
+    'snappol' specifies snapshot retention count and interval(15min, 1hour, 1day, 1month, 1year)
     'volperf' volume-level total max iops and bandwidth(KBps)
+    'clone' clones a specified application instance
 
 
 """
@@ -110,10 +115,10 @@ def vol_create(si, name, args):
     vol = si.volumes.create(
         name=name, size=int(args.size),
         replica_count=int(numreplicas))
-    if args.volsnap:
+    if args.snappol:
        vol.snapshot_policies.create(
-         name=name, retention_count=int(args.volsnap[0]),
-         interval=args.volsnap[1])
+         name=name, retention_count=int(args.snappol[0]),
+         interval=args.snappol[1])
     if args.volperf:
        vol.performance_policy.create(
          total_iops_max = int(args.volperf[0]), 
@@ -147,10 +152,10 @@ def run_cmd(cmd):
     os.system(cmd)
 
 
-def target_logout_and_node_cleanup(api, node, name):
+def target_logout_and_node_cleanup(api, node, basename):
     for ai in api.app_instances.list():
         for si in ai.storage_instances.list():
-            if name in ai['name']:
+            if ai['name'].startswith(basename):
                 print si['access']['ips']
                 if 'iqn' in si['access']:
                     run_cmd("iscsiadm -m node -u -T %s" % si['access']['iqn'])
@@ -269,23 +274,33 @@ def dm_to_mapper(dm):
     f.closed
     return mapper
 
+def map_def(api, basename, ai_list):
+     map = {}
+     for ai in ai_list:
+        ai = ai.reload()
+        for si in ai['storage_instances'].itervalues():
+            for v in si['volumes'].itervalues():
+                id = v['uuid']
+                if not basename or basename in ai['name']:
+                    map[id] = {'aname': ai['name'], 'sname': si['name'],'vname': v['name'], 'id': id, 'nodename': si_to_hostname(api,si) }
+                    if 'iqn' in si['access']:
+                        map[id]['iqn'] = si['access']['iqn']
+     return map
+  
 
 def mpmap(api, args):
     dist = platform.dist()[0]
-    map = {}
+    #map = {}
     mntmap = []
+    basename = args.basename
 
-    for ai in api.app_instances.list():
-        for si in ai.storage_instances.list():
-            for v in si.volumes.list():
-                id = v['uuid']
-                if not args.basename or args.basename in ai['name']:
-                    map[id] = {'aname': ai['name'], 'sname': si['name'],
-                               'vname': v['name'], 'id': id,
-                               'nodename': si_to_hostname(api,si) }
-                    if 'iqn' in si['access']:
-                        map[id]['iqn'] = si['access']['iqn']
-
+    if args.clone:
+       assert CLONE_AI_LIST, "clone list is EMPTY"
+       ai_list = CLONE_AI_LIST
+    else:
+       ai_list = api.app_instances.list()
+    map = map_def(api, basename, ai_list)
+    
     for m in map:
         if args.volperf:
             print "Sleeping 3s for target to be discovered"
@@ -310,7 +325,7 @@ def mpmap(api, args):
                 map[m]['nodename'])
             print dm_map
 
-            if args.mkfs:
+            if args.mkfs or args.clone:
                     # ASSUME "singleton" 1:1:1 (app_inst:storage_inst:vol)
                     mntpoint = map[m]['aname']
                     # Change any remaining '_' to '-'
@@ -319,7 +334,7 @@ def mpmap(api, args):
                         mntpoint = args.dirprefix + "/" + mntpoint
                     mntmap.append([dmpath, mntpoint, args])
 
-    if args.mkfs:
+    if args.mkfs or args.clone:
 #        pool = mp.Pool()
 #        list(pool.imap_unordered(mkfs, mntmap))
         return mntmap
@@ -327,25 +342,25 @@ def mpmap(api, args):
        return map
 
 def create_fio_template():
-    with open('fiotemplate','w') as f:
+    with open('fiotemplate.fio','w') as f:
        lines = ["[global]","randrepeat=0","ioengine=libaio","iodepth=16","direct=1","numjobs=4","runtime=3600","group_reporting","time_based"]
        for line in lines:
           f.write(line + '\n')
 
 def create_fio_files(api,args):
 
-    fio = {'fio_randread':{'rw':'randread', 'blocksize':'4k'},
-           'fio_seqread':{'rw':'read', 'blocksize':'1m'},
-           'fio_randwrite':{'rw':'randwrite', 'blocksize':'4k'},
-           'fio_seqwrite':{'rw':'write', 'blocksize':'1m'},
-           'fio_randreadwrite':{'rw':'randrw', 'rwmixread': '70', 'blocksize':'4k'}
+    fio = {args.basename + '_randread.fio':{'rw':'randread', 'blocksize':'4k'},
+           args.basename + '_seqread.fio':{'rw':'read', 'blocksize':'1m'},
+           args.basename + '_randwrite.fio':{'rw':'randwrite', 'blocksize':'4k'},
+           args.basename + '_seqwrite.fio':{'rw':'write', 'blocksize':'1m'},
+           args.basename + '_randreadwrite.fio':{'rw':'randrw', 'rwmixread': '70', 'blocksize':'4k'}
           }
 
     create_fio_template()
     mntmap = mpmap(api,args)
 
     for key,item in fio.items():
-       with open('fiotemplate', 'r') as f:
+       with open('fiotemplate.fio', 'r') as f:
           with open(key, 'w') as key:
              for line in f:
                 key.write(line)
@@ -353,18 +368,94 @@ def create_fio_files(api,args):
                 key.write(param + "=" + item[param] + '\n')
              if args.mkfs:
                 for index in range(len(mntmap)):
-                   key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
+                   #key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
+                   key.write("[fiofile]" + '\n')
                    key.write("directory=/" + mntmap[index][1] + '\n')
                    key.write("size=100%" + '\n')
              else:
                  for id in mntmap:
-                    key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
+                    #key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
+                    key.write("[fiofile]" + '\n')
                     sd = iqn_to_sd(args, mntmap[id]['iqn'])
                     if sd:
                        dm = sd_to_dm(sd)
                        key.write("filename=/dev/" + dm + '\n')
                        key.write("size=100%" + '\n')
 
+def get_volume_id_and_path(api, app_instance):
+    volume_map = {}
+    ai = api.app_instances.get(app_instance['name'])
+    for si in ai['storage_instances'].keys():
+       volume_map[si] = {}
+       for vol in ai['storage_instances'][si]['volumes'].keys():
+          volume_map[si][vol] = {}
+          volume_map[si][vol]['path'] = ai['storage_instances'][si]['volumes'][vol]['path']
+          if 'acl_policy' in ai['storage_instances'][si]:
+             volume_map[si][vol]['acl_policy'] = ai['storage_instances'][si]['acl_policy']['initiators']
+          if 'performance_policy' in ai['storage_instances'][si]['volumes'][vol]:
+             volume_map[si][vol]['performance_policy'] = ai['storage_instances'][si]['volumes'][vol]['performance_policy']
+          if 'snapshot_policies' in ai['storage_instances'][si]['volumes'][vol]:
+             volume_map[si][vol]['snapshot_policy'] = ai['storage_instances'][si]['volumes'][vol]['snapshot_policies']
+    return volume_map
+
+def copy_snapshot_policy(new_app_instance, volume_map, si, vol):
+    for snapid in volume_map[si][vol]['snapshot_policy']:
+        name = volume_map[si][vol]['snapshot_policy'][snapid]['name']
+        ret_count = volume_map[si][vol]['snapshot_policy'][snapid]['retention_count']
+        start_time = volume_map[si][vol]['snapshot_policy'][snapid]['start_time']
+        interval =  volume_map[si][vol]['snapshot_policy'][snapid]['interval']
+        new_app_instance.storage_instances.get(si).volumes.get(vol).snapshot_policies.create(name=name, retention_count=ret_count, start_time=start_time, interval=interval)
+
+def clone_an_app_instance(api,args):
+    clone_ai_list = []
+    for app_instance in api.app_instances.list():
+        if app_instance["name"].startswith(args.basename):
+	    try:
+                # get volume id
+                volume_map = get_volume_id_and_path(api, app_instance)
+                for si in volume_map.keys():
+                   for vol in volume_map[si].keys():
+                      # clone app Intance with volume id as the new name
+                      new_app_instance = api.app_instances.create(name=app_instance['name'] + "_clone", clone_src=volume_map[si][vol]['path'])
+                      # copy acl policies
+                      if 'acl_policy' in volume_map[si][vol]:
+                         acl_policy = api.app_instances.get(app_instance['name']).storage_instances.get(si).acl_policy.get()
+                         new_app_instance.storage_instances.get(si).acl_policy.set(initiators=[str(volume_map[si][vol]['acl_policy'][0])])
+                         time.sleep(2)
+                         if new_app_instance.reload()['storage_instances'][si]['op_state'] != "available":
+                             print "error copying acl_policies"
+                             sys.exit(1) 
+                         #add initiator groups
+                      # copy performance policies
+                      if 'performance_policy' in volume_map[si][vol]:
+                         performance_policy = api.app_instances.get(app_instance['name']).storage_instances.get(si).volumes.get(vol).performance_policy.list()[0]
+                         new_app_instance.storage_instances.get(si).volumes.get(vol).performance_policy.create(total_iops_max=performance_policy['total_iops_max'],
+                         total_bandwidth_max=performance_policy['total_bandwidth_max'],
+                         read_iops_max=performance_policy['read_iops_max'],
+                         read_bandwidth_max=performance_policy['read_bandwidth_max'],
+                         write_iops_max=performance_policy['write_iops_max'],
+                         write_bandwidth_max=performance_policy['write_bandwidth_max'])
+                         time.sleep(2)
+                         if new_app_instance.reload()['storage_instances'][si]['op_state'] != "available":
+                             print "error copying performance_policies"
+                             sys.exit(1) 
+                      # copy snapshot policies
+                      if 'snapshot_policy' in volume_map[si][vol]:
+                         copy_snapshot_policy(new_app_instance, volume_map, si, vol)
+                         time.sleep(2)
+                         if new_app_instance.reload()['storage_instances'][si]['op_state'] != "available":
+                             print "error copying snapshot_policies"
+                             sys.exit(1) 
+                      print "cloned " + app_instance['name'] + " to " + new_app_instance['name']
+                      state = api.app_instances.get(new_app_instance["name"]).set(admin_state="online")
+                      print "setting admin state of " + new_app_instance['name'] + " to " + state["admin_state"]
+                      clone_ai_list.append(new_app_instance)
+            except KeyError:
+                msg = "appInstance: [{}] doesn't exist".format(app_instance['name'])
+                print msg
+                continue
+    return clone_ai_list
+   
 def chktempl(api, templ):
     for at in api.app_templates.list():
         if at['name'] == templ:
@@ -380,8 +471,12 @@ def unmount(name):
            print "skipping unmount of /"
            return None
         p = os.path.basename(line)
+        print p
+        print line
         run_cmd("umount %s" % line)
         run_cmd("rm -rf %s" % line)
+     # cleanup fio files
+    run_cmd("rm -rf " + name + "*.fio")
 
 
 def nocreds():
@@ -406,7 +501,7 @@ def chk_args(args):
 
     # options required if basename
     if args.basename and not (args.template or args.count or
-                              args.cleanall or args.mpmap or args.mkfs):
+                              args.cleanall or args.mpmap or args.mkfs or args.clone):
         print "ERROR: Missing required arguments for 'basename'"
         usage()
 
@@ -441,11 +536,11 @@ def chk_args(args):
         print "ERROR: Only 'xfs' and 'ext4' are allowed for fstype"
         usage()
     
-    if args.volsnap:
-       if args.volsnap[0].isdigit() == False:
+    if args.snappol:
+       if args.snappol[0].isdigit() == False:
           print "ERROR: RETCOUNT must be an integer"
           usage()
-       if args.volsnap[1] not in ('15min','1hour','1day','1week','1month','1year'):
+       if args.snappol[1] not in ('15min','1hour','1day','1week','1month','1year'):
           print "ERROR: INTERVAL must be '15min' or '1hour' or '1day' or '1week' or '1month' or '1year'"
           usage()
     
@@ -530,11 +625,13 @@ def main():
     parser.add_argument('--dirprefix', action="store", dest='dirprefix')
     parser.add_argument('--chown', action="store", dest='chown')
     parser.add_argument('--fstype', action="store", dest='fstype')
-    parser.add_argument('--volsnap', action="store", dest="volsnap", nargs=2, 
+    parser.add_argument('--snappol', action="store", dest="snappol", nargs=2, 
                        metavar=('RETCOUNT','INTERVAL'),help='volume-level snapshot retention count and interval')
     parser.add_argument('--volperf', action="store", dest="volperf", nargs=2, 
                        metavar=('TOTAL_IOPS_MAX','TOTAL_BANDWIDTH_MAX[KBps]'), type=int, 
                        help='volume-level iops and bandwidth policies')
+    parser.add_argument('--clone', action="store_true",
+                       help='clones app instances that start with basename')
     args = parser.parse_args()
 
     creds = os.getenv("DTSCREDS")
@@ -632,13 +729,43 @@ def main():
 
         run_cmd("lsscsi -t")
 
+    if args.createfio:
+        create_fio_files(api,args)
+    
+    if args.clone:
+        cmd="mount |grep " + args.basename
+        global CLONE_AI_LIST 
+        CLONE_AI_LIST = clone_an_app_instance(api,args)
+        
+        #discover cloned volumes and login
+        for ai in api.app_instances.list():
+            if ai['name'].startswith(args.basename) and ai["name"].endswith("clone"):
+                si = ai.storage_instances.list()[0]
+                target_login(host, si, iscsi_initiator, sleep=0)
+
+        run_cmd("lsscsi -t")
+        mntmap = mpmap(api, args)
+        
+        try:
+           output = subprocess.check_output(cmd, shell=True)
+           if args.basename in output:
+              for item in mntmap:
+                 if "xfs" in output:
+                    cmd = "mkdir -p /{}; mount -o nouuid {} /{}".format(item[1],item[0],item[1])
+                 else:
+                    cmd = "mkdir -p /{}; mount {} /{}".format(item[1],item[0],item[1])
+                 print "mounting " + item[1]
+                 os.system(cmd)
+                 if item[2].chown:
+                    os.system("chown -R {} /{}".format(item[2].chown, item[1]))
+        except subprocess.CalledProcessError as e:
+           print str(e) + "\n" + basename + " are block devices without filesystems. Cannot mount clone."
+           pass
+
     if args.mkfs:
         mntmap = mpmap(api, args)
         pool = mp.Pool()
         list(pool.imap_unordered(mkfs, mntmap))
- 
-    if args.createfio:
-        create_fio_files(api,args)
-
+        
 if __name__ == '__main__':
     main()
