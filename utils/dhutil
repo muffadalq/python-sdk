@@ -756,7 +756,7 @@ def main():
                  if "xfs" in output:
                     cmd = "mkdir -p /{}; mount -o nouuid {} /{}".format(item[1],item[0],item[1])
                  else:
-                    cmd = "mkdir -p /{}; mount {} /{}".format([item][1],item[0],item[1])
+                    cmd = "mkdir -p /{}; mount {} /{}".format(item[1],item[0],item[1])
                  print "mounting " + item[1]
                  os.system(cmd)
                  if item[2].chown:
