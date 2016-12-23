@@ -265,7 +265,7 @@ def sd_to_dm(sd):
 def dm_to_mapper(dm):
     fname = "{}/{}/dm/name".format(SYS_BLOCK, dm)
     with open(fname, 'r') as f:
-       mapper = (f.read().strip())
+       mapper = f.read().strip()
     f.closed
     return mapper
 
@@ -368,11 +368,9 @@ def create_fio_files(api,args):
                  for id in mntmap:
                     #key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
                     key.write("[fiofile]" + '\n')
-                    sd = iqn_to_sd(args, mntmap[id]['iqn'])
-                    if sd:
-                       dm = sd_to_dm(sd)
-                       key.write("filename=/dev/" + dm + '\n')
-                       key.write("size=100%" + '\n')
+                    dm = uuid_to_dm(args, mntmap[id]['id'])
+                    key.write("filename=/dev/" + dm + '\n')
+                    key.write("size=100%" + '\n')
 
 def get_volume_id_and_path(api, app_instance):
     volume_map = {}
@@ -752,18 +750,17 @@ def main():
         mntmap = mpmap(api, args)
         
         try:
-           output = subprocess.check_output(cmd)
+           output = subprocess.check_output(cmd, shell=True)
            if args.basename in output:
-              for index in range(len(mntmap)):
-                 for mapper_item in mntmap[index][0]:
-                    if "xfs" in output:
-                       cmd = "mkdir -p /{}; mount -o nouuid {} /{}".format(mntmap[index][1],mapper_item,mntmap[index][1])
-                    else:
-                       cmd = "mkdir -p /{}; mount {} /{}".format(mntmap[index][1],mapper_item,mntmap[index][1])
-                    print "mounting " + mntmap[index][1]
+              for item in mntmap:
+                 if "xfs" in output:
+                    cmd = "mkdir -p /{}; mount -o nouuid {} /{}".format(item[1],item[0],item[1])
+                 else:
+                    cmd = "mkdir -p /{}; mount {} /{}".format([item][1],item[0],item[1])
+                 print "mounting " + item[1]
                  os.system(cmd)
-                 if mntmap[index][2].chown:
-                    os.system("chown -R {} /{}".format(mntmap[index][2].chown, mntmap[index][1]))
+                 if item[2].chown:
+                    os.system("chown -R {} /{}".format(item[2].chown, item[1]))
         except subprocess.CalledProcessError as e:
            print str(e) + "\n" + basename + " are block devices without filesystems. Cannot mount clone."
            pass
