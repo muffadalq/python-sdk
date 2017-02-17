@@ -54,7 +54,7 @@ from dfs_sdk import DateraApi
 SLEEP = 10
 NUMREPLICAS = 3
 DISK_BY_PATH = "/dev/disk/by-path"
-DISK_BY_UUID = "/dev/disk/by-uuid"
+#DISK_BY_UUID = "/dev/disk/by-uuid"
 SYS_BLOCK = "/sys/block"
 CLONE_AI_LIST = []
 
@@ -256,6 +256,11 @@ def uuid_to_dm(args,uuid):
         if uuid in f:
            return os.path.basename(os.readlink(DISK_BY_UUID + "/" + uuid))
 
+def iqn_to_sd(args,iqn):		 
+    for f in os.listdir(DISK_BY_PATH):
+        if iqn in f:
+           return os.path.basename(os.readlink(DISK_BY_PATH + "/" + f))
+
 def sd_to_dm(sd):
     for f in os.listdir(SYS_BLOCK):
         t = SYS_BLOCK + "/" + f + "/" + "slaves" + "/" + sd
@@ -303,23 +308,26 @@ def mpmap(api, args):
         if args.volperf:
             print "Sleeping 3s for target to be discovered"
             time.sleep(3)
-        dm = uuid_to_dm(args,map[m]['id'])
-        if not dm:
+        sd = iqn_to_sd(args,map[m]['iqn'])
+        if sd:
+            dm = sd_to_dm(sd)
+            #dm = uuid_to_dm(args,map[m]['id'])
+            if not dm:
                 print "No DM for sd: ", sd + ". Please make sure that multipath service is running. Then cleanall and retry"
                 sys.exit(-1)
-        mapper = dm_to_mapper(dm)
-        if not mapper:
-             print "No mapper entry for dm: ", dm + ". Please make sure that multipath service is running. Then cleanall and retry"
-             sys.exit(-1)
-        dmpath = mapper_to_dmpath(mapper)
+            mapper = dm_to_mapper(dm)
+            if not mapper:
+                print "No mapper entry for dm: ", dm + ". Please make sure that multipath service is running. Then cleanall and retry"
+                sys.exit(-1)
+            dmpath = mapper_to_dmpath(mapper)
 
-        print "HOST-DM: " + dm + \
-              "   DATERA: " + map[m]['aname'] + "/" + map[m]['sname']  + "/" + map[m]['vname'] + \
-              "   IQN: " + map[m]['iqn'] + \
-              "   MAPPER: /dev/mapper/" + mapper + \
-              "   NODE:" + map[m]['nodename']
+            print "HOST-DM: " + dm + \
+                  "   DATERA: " + map[m]['aname'] + "/" + map[m]['sname']  + "/" + map[m]['vname'] + \
+                  "   IQN: " + map[m]['iqn'] + \
+                  "   MAPPER: /dev/mapper/" + mapper + \
+                  "   NODE:" + map[m]['nodename']
 
-        if args.mkfs or args.clone:
+            if args.mkfs or args.clone:
                 # ASSUME "singleton" 1:1:1 (app_inst:storage_inst:vol)
                 mntpoint = map[m]['aname'] + "-" + map[m]['vname']
                 if args.dirprefix:
@@ -362,15 +370,18 @@ def create_fio_files(api,args):
                 for index in range(len(mntmap)):
                    #key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
                    key.write("[fiofile]" + '\n')
-                   key.write("directory=/" + mntmap[index][1] + '\n')
-                   key.write("size=100%" + '\n')
+                   key.write("directory=" + mntmap[index][1] + '\n')
+                   key.write("size=500M" + '\n')
              else:
                  for id in mntmap:
                     #key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
                     key.write("[fiofile]" + '\n')
-                    dm = uuid_to_dm(args, mntmap[id]['id'])
-                    key.write("filename=/dev/" + dm + '\n')
-                    key.write("size=100%" + '\n')
+                    sd = iqn_to_sd(args, mntmap[id]['iqn'])
+                    if sd:
+                       #dm = uuid_to_dm(args, mntmap[id]['id'])
+                       dm = sd_to_dm(sd)
+                       key.write("filename=/dev/" + dm + '\n')
+                       key.write("size=500M" + '\n')
 
 def get_volume_id_and_path(api, app_instance):
     volume_map = {}
