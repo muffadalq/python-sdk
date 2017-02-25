@@ -89,6 +89,11 @@ class ApiInvalidRequestError(_ApiResponseError):
     pass
 
 
+class ApiValidationFailedError(ApiInvalidRequestError):
+    """ Request failed validation, see message attribute for reason """
+    pass
+
+
 class ApiNotFoundError(_ApiResponseError):
     """ HTTP 404 Not Found """
     pass

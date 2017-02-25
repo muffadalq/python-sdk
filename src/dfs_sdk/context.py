@@ -16,6 +16,7 @@ class ApiContext(object):
         self.hostname = None
         self.username = None
         self.password = None
+        self.tenant = None
 
         self.timeout = None
         self.secure = None

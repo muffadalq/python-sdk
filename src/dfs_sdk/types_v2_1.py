@@ -1,5 +1,5 @@
 """
-Provides the various v2 endpoints and entities
+Provides the various v2.1 endpoints and entities
 """
 from .base import Endpoint as _Endpoint
 from .base import ContainerEndpoint as _ContainerEndpoint
@@ -11,8 +11,7 @@ from .base import MetricCollectionEndpoint as _MetricCollectionEndpoint
 from .base import MetricEndpoint as _MetricEndpoint
 from .base import Entity as _Entity
 from .base import MonitoringStatusEndpoint as _MonitoringStatusEndpoint
-
-__copyright__ = "Copyright 2015, Datera, Inc."
+__copyright__ = "Copyright 2016, Datera, Inc."
 
 
 ##################################################################
@@ -52,6 +51,11 @@ class AppInstance(_Entity):
         self._set_subendpoint(SnapshotPoliciesEp)
         self._set_subendpoint(SnapshotsEp)
 
+
+class Tenant(_Entity):
+
+    def __init__(self, *args):
+        super(Tenant, self).__init__(*args)
 
 class AppTemplate(_Entity):
     """
@@ -106,7 +110,6 @@ class Users(_Entity):
     def __init__(self, *args):
         super(Users, self).__init__(*args)
         self._set_subendpoint(UsersRolesRefEp)
-
 
 class Roles(_Entity):
     """ get,list,modify methods for roles   """
@@ -290,6 +293,47 @@ class Network(_Entity):
         self._set_subendpoint(InternalNetworkEp)
         self._set_subendpoint(NetworkMappingEp)
 
+class Monitoring(_Entity):
+
+    def __init__(self, *args):
+        super(Monitoring, self).__init__(*args)
+        self._set_subendpoint(PoliciesEp)
+        self._set_subendpoint(DestinationsEp)
+
+class Policies(_Entity):
+
+    def __init__(self, *args):
+        super(Policies, self).__init__(*args)
+        self._set_subendpoint(DefaultEp)
+
+class Destinations(_Entity):
+
+    def __init__(self, *args):
+        super(Destinations, self).__init__(*args)
+        self._set_subendpoint(DefaultEp)
+
+class Default(_Entity):
+
+    def __init__(self, *args):
+        super(Default, self).__init__(*args)
+
+class Events(_Entity):
+
+    def __init__(self, *args):
+        super(Events, self).__init__(*args)
+        self._set_subendpoint(UserEp)
+
+class Metrics(_Entity):
+
+    def __init__(self, *args):
+        super(Metrics, self).__init__(*args)
+        self._set_subendpoint(IoEp)
+        self._set_subendpoint(HwEp)
+
+class User(_Entity):
+
+    def __init__(self, *args):
+        super(User, self).__init__(*args)
 
 class System(_Entity):
 
@@ -303,7 +347,13 @@ class System(_Entity):
         self._set_subendpoint(HealthStatusEp)
         self._set_subendpoint(StorageStatusEp)
         self._set_subendpoint(VolumeStatusEp)
-
+        self._set_subendpoint(SnmpPolicyEp)
+        
+class SnmpPolicy(_Entity):
+   
+    def __init__(self, *args):
+        super(SnmpPolicy, self).__init__(*args)
+        self._set_subendpoint(UsersEp)
 
 class AclPolicy(_Entity):
 
@@ -311,7 +361,6 @@ class AclPolicy(_Entity):
         super(AclPolicy, self).__init__(*args)
         self._set_subendpoint(AclPolicyInitiatorsRefEp)
         self._set_subendpoint(AclPolicyEpInitiatorGroupsRefEp)
-
 
 class AccessControl(_Entity):
 
@@ -376,8 +425,18 @@ class StorageStatus(_Entity):
 class VolumeStatus(_Entity):
     def __init__(self, *args):
         super(VolumeStatus, self).__init__(*args)
+        
+###############################################################################
+# SNMP Endpoint classes
 
+class SnmpPolicyEp(_SingletonEndpoint):
+    _name = "snmp_policy"
+    _entity_cls = SnmpPolicy
 
+    def __init__(self, *args):
+        super(SnmpPolicyEp, self).__init__(*args)
+        self._set_subendpoint(UsersEp)
+        
 ###############################################################################
 #
 #  SingletonEndpoint classes
@@ -396,7 +455,7 @@ class SystemEp(_SingletonEndpoint):
         self._set_subendpoint(HealthStatusEp)
         self._set_subendpoint(StorageStatusEp)
         self._set_subendpoint(VolumeStatusEp)
-
+        self._set_subendpoint(SnmpPolicyEp)     
 
 class ApiEp(_SingletonEndpoint):
     _name = "api"
@@ -541,6 +600,15 @@ class UpgradeEp(_SingletonEndpoint):
 #  ContainerEndpoint classes
 
 
+class TenantsEp(_ContainerEndpoint):
+    _name = "tenants"
+    _entity_cls = Tenant
+
+    def __init__(self, *args):
+        super(TenantsEp, self).__init__(*args)
+
+
+
 class NetworkPathsEp(_ContainerEndpoint):
     _name = "network_paths"
     _entity_cls = NetworkPath
@@ -601,6 +669,76 @@ class AppInstancesEp(_ContainerEndpoint):
     def __init__(self, *args):
         super(AppInstancesEp, self).__init__(*args)
 
+class MonitoringEp(_SingletonEndpoint):
+    """
+        /monitoring
+	get() / list() / set()
+    """
+    _name = "monitoring"
+    _entity_cls = Monitoring
+
+    def __init__(self, *args):
+        super(MonitoringEp, self).__init__(*args)
+        self._set_subendpoint(PoliciesEp)
+        self._set_subendpoint(DestinationsEp)
+
+class PoliciesEp(_SingletonEndpoint):
+    """
+        /monitoring/policies
+        get() / list() / set()
+    """
+    _name = "policies"
+    _entity_cls = Policies
+
+    def __init__(self, *args):
+        super(PoliciesEp, self).__init__(*args)
+        self._set_subendpoint(DefaultEp)
+
+class DefaultEp(_SingletonEndpoint):
+    """
+        /monitoring/destinations/default
+        get() / list() / set()
+    """
+    _name = "default"
+    _entity_cls = Policies
+
+    def __init__(self, *args):
+        super(DefaultEp, self).__init__(*args)
+
+class DestinationsEp(_SingletonEndpoint):
+    """
+        /monitoring/destinations
+        get() / list() / set()
+    """
+    _name = "destinations"
+    _entity_cls = Destinations
+
+    def __init__(self, *args):
+        super(DestinationsEp, self).__init__(*args)
+        self._set_subendpoint(DefaultEp)
+
+class EventsEp(_SingletonEndpoint):
+    """
+        /events
+    get()
+    """
+    _name = "events"
+    _entity_cls = Events
+
+    def __init__(self, *args):
+        super(EventsEp, self).__init__(*args)
+        self._set_subendpoint(UserEp)
+
+class UserEp(_ContainerEndpoint):
+    """
+        /monitoring/destinations/default
+        get() / list() / set()
+    """
+    _name = "user"
+    _entity_cls = Events
+
+    def __init__(self, *args):
+        super(UserEp, self).__init__(*args)
 
 class AppTemplatesEp(_ContainerEndpoint):
     """
@@ -701,7 +839,6 @@ class UsersEp(_ContainerEndpoint):
     def __init__(self, *args):
         super(UsersEp, self).__init__(*args)
 
-
 class RolesEp(_ContainerEndpoint):
     """      """
     _name = "roles"
@@ -745,7 +882,7 @@ class NicsEp(_ContainerEndpoint):
 
 
 class NvmFlashDevicesEp(_ContainerEndpoint):
-    _name = "nvm_flash_devices"
+    _name = "flash_devices"
     _entity_cls = NvmFlashDevice
 
     def __init__(self, *args):
@@ -769,7 +906,7 @@ class BootDrivesEp(_ContainerEndpoint):
 
 
 class SubsystemEp(_SingletonEndpoint):
-    _name = "subsystem_health"
+    _name = "subsystem_states"
     _entity_cls = Subsystem
 
     def __init__(self, *args):
@@ -980,6 +1117,7 @@ class ReadsEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(ReadsEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class WritesEp(_MetricEndpoint):
@@ -988,6 +1126,7 @@ class WritesEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(WritesEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class BytesReadEp(_MetricEndpoint):
@@ -996,6 +1135,7 @@ class BytesReadEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(BytesReadEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class BytessWrittenEp(_MetricEndpoint):
@@ -1004,6 +1144,7 @@ class BytessWrittenEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(BytessWrittenEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class IopsReadEp(_MetricEndpoint):
@@ -1012,6 +1153,7 @@ class IopsReadEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(IopsReadEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class IopsWriteEp(_MetricEndpoint):
@@ -1020,6 +1162,7 @@ class IopsWriteEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(IopsWriteEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class ThptReadEp(_MetricEndpoint):
@@ -1028,6 +1171,7 @@ class ThptReadEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(ThptReadEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class ThptWriteEp(_MetricEndpoint):
@@ -1036,6 +1180,7 @@ class ThptWriteEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(ThptWriteEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class LatAvgReadEp(_MetricEndpoint):
@@ -1044,6 +1189,7 @@ class LatAvgReadEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(LatAvgReadEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class LatAvgWriteEp(_MetricEndpoint):
@@ -1052,6 +1198,7 @@ class LatAvgWriteEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(LatAvgWriteEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class Lat50ReadEp(_MetricEndpoint):
@@ -1060,6 +1207,7 @@ class Lat50ReadEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(Lat50ReadEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class Lat90ReadEp(_MetricEndpoint):
@@ -1068,6 +1216,7 @@ class Lat90ReadEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(Lat90ReadEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class Lat100ReadEp(_MetricEndpoint):
@@ -1076,6 +1225,7 @@ class Lat100ReadEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(Lat100ReadEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class Lat50WriteEp(_MetricEndpoint):
@@ -1084,6 +1234,7 @@ class Lat50WriteEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(Lat50WriteEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class Lat90WriteEp(_MetricEndpoint):
@@ -1092,6 +1243,7 @@ class Lat90WriteEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(Lat90WriteEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class Lat100WriteEp(_MetricEndpoint):
@@ -1100,6 +1252,7 @@ class Lat100WriteEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(Lat100WriteEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
 
 class CpuUsageEp(_MetricEndpoint):
@@ -1108,7 +1261,61 @@ class CpuUsageEp(_MetricEndpoint):
 
     def __init__(self, *args):
         super(CpuUsageEp, self).__init__(*args)
+        self._set_subendpoint(LatestEP)
 
+
+###############################################################################
+
+class MetricsEp(_SingletonEndpoint):
+    _name = "metrics"
+    _entity_cls = Metrics
+
+    def __init__(self, *args):
+        super(MetricsEp, self).__init__(*args)
+        self._set_subendpoint(IoEp)
+        self._set_subendpoint(HwEp)
+
+
+class IoEp(_ContainerEndpoint):
+    _name = "io"
+    _entity_cls = _Entity
+
+    def __init__(self, *args):
+        super(IoEp, self).__init__(*args)
+        self._set_subendpoint(ReadsEp)
+        self._set_subendpoint(WritesEp)
+        self._set_subendpoint(BytesReadEp)
+        self._set_subendpoint(BytessWrittenEp)
+        self._set_subendpoint(IopsReadEp)
+        self._set_subendpoint(IopsWriteEp)
+        self._set_subendpoint(ThptReadEp)
+        self._set_subendpoint(ThptWriteEp)
+        self._set_subendpoint(LatAvgReadEp)
+        self._set_subendpoint(LatAvgWriteEp)
+        self._set_subendpoint(Lat50ReadEp)
+        self._set_subendpoint(Lat90ReadEp)
+        self._set_subendpoint(Lat100ReadEp)
+        self._set_subendpoint(Lat50WriteEp)
+        self._set_subendpoint(Lat90WriteEp)
+        self._set_subendpoint(Lat100WriteEp)
+
+
+
+class HwEp(_ContainerEndpoint):
+    _name = "hw"
+    _entity_cls = _Entity
+
+    def __init__(self, *args):
+        super(HwEp, self).__init__(*args)
+        self._set_subendpoint(CpuUsageEp)
+
+
+class LatestEP(_ContainerEndpoint):
+    _name = "latest"
+    _entity_cls = _Entity
+
+    def __init__(self, *args):
+        super(LatestEP, self).__init__(*args)
 
 ###############################################################################
 
@@ -1156,8 +1363,11 @@ class RootEp(_Endpoint):
         self._set_subendpoint(RolesEp)
         self._set_subendpoint(UsersEp)
         self._set_subendpoint(UpgradeEp)
+        self._set_subendpoint(MonitoringEp)
         self._set_subendpoint(TimeEp)
         self._set_subendpoint(InitEp)
-
+        self._set_subendpoint(TenantsEp)
+        self._set_subendpoint(EventsEp)
+        self._set_subendpoint(MetricsEp)
 
 ###############################################################################
