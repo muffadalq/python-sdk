@@ -1,23 +1,24 @@
 """
-Provides the v2 DateraApi object
+Provides the v2.1 DateraApi object
 """
-__copyright__ = "Copyright 2015, Datera, Inc."
+__copyright__ = "Copyright 2016, Datera, Inc."
 
 
 from .constants import DEFAULT_HTTP_TIMEOUT
 from .connection import ApiConnection
 from .context import ApiContext
-from .types_v2 import RootEp
+from .types_v2_1 import RootEp
 
-API_VERSION = "v2"
+API_VERSION = "v2.1"
 
 
-class DateraApi(RootEp):
+class DateraApi21(RootEp):
     """
     Use this object to talk to the REST interface of a Datera cluster
     """
 
     def __init__(self, hostname, username=None, password=None,
+                 tenant=None,
                  timeout=DEFAULT_HTTP_TIMEOUT,
                  immediate_login=True,
                  secure=True):
@@ -26,6 +27,7 @@ class DateraApi(RootEp):
           hostname (str) - IP address or host name
           username (str) - Username to log in with, e.g. "admin"
           password (str) - Password to use when logging in to the cluster
+          tenant (str) - Tenant, or None
           timeout (float) - HTTP connection  timeout.  If None, use system
                             default.
           secure (boolean) - Use HTTPS instead of HTTP, defaults to HTTPS
@@ -40,6 +42,7 @@ class DateraApi(RootEp):
         self._context = self._create_context(hostname,
                                              username=username,
                                              password=password,
+                                             tenant=tenant,
                                              timeout=timeout,
                                              secure=secure)
 
@@ -47,9 +50,10 @@ class DateraApi(RootEp):
             self._context.connection.login(name=username, password=password)
 
         # Initialize sub-endpoints:
-        super(DateraApi, self).__init__(self._context, None)
+        super(DateraApi21, self).__init__(self._context, None)
 
     def _create_context(self, hostname, username=None, password=None,
+                        tenant=None,
                         timeout=None, secure=True):
         """
         Creates the context object
@@ -65,6 +69,7 @@ class DateraApi(RootEp):
         context.hostname = hostname
         context.username = username
         context.password = password
+        context.tenant = tenant
 
         context.timeout = timeout
         context.secure = secure
