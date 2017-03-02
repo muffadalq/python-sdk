@@ -21,7 +21,6 @@ Usage:
         --snappol  <RETCOUNT> <SNAPINTERVAL>
         --volperf  <TOTAL_IOPS_MAX> <TOTAL_BANDWIDTH_MAX>
         --clone <APP_INSTANCE_NAME> 
-        --tenant <TENANT_NAME>
 
     'basename' corresponds to the app_instance
     'size' is interpreted as number of GB.
@@ -39,7 +38,6 @@ Usage:
     'snappol' specifies snapshot retention count and interval
     'volperf' volume-level total max iops and bandwidth
     'clone' clone a specified application instance
-    'tenant' uses the specified tenant name for create application instances
 
 """
 import sys
@@ -52,7 +50,6 @@ import linecache
 import re
 import multiprocessing as mp
 from dfs_sdk import DateraApi
-from dfs_sdk import DateraApi21
 
 SLEEP = 10
 NUMREPLICAS = 3
@@ -60,7 +57,6 @@ DISK_BY_PATH = "/dev/disk/by-path"
 #DISK_BY_UUID = "/dev/disk/by-uuid"
 SYS_BLOCK = "/sys/block"
 CLONE_AI_LIST = []
-API_VER = "2.1"
 
 
 def usage():
@@ -83,7 +79,6 @@ Usage:
         --snappol  <RETCOUNT> <SNAPINTERVAL>
         --volperf  <TOTAL_IOPS_MAX> <TOTAL_BANDWIDTH_MAX>
         --clone <APP_INSTANCE_NAME> 
-        --tenant <TENANT_NAME>
 
     'basename' corresponds to the app_instance
     'size' is interpreted as number of GB.
@@ -101,7 +96,6 @@ Usage:
     'snappol' specifies snapshot retention count and interval(15min, 1hour, 1day, 1month, 1year)
     'volperf' volume-level total max iops and bandwidth(KBps)
     'clone' clones a specified application instance
-    'tenant' uses the specified tenant name for create application instances
 
 
 """
@@ -114,28 +108,22 @@ Usage:
 #
 
 
-def vol_create(si, name, args, api):
+def vol_create(si, name, args):
     if args.numreplicas:
         numreplicas = args.numreplicas
     else:
         numreplicas = NUMREPLICAS
-    tenant = ''
-    if args.tenant:
-       tenant = "/root/" + args.tenant
-    #if api.system.get()['sw_version'] > API_VER:
-    if api.system.get()['sw_version'].startswith(API_VER):
-       vol = si.volumes.create(name=name, size=int(args.size),replica_count=int(numreplicas), tenant=tenant)
-       if args.snappol:
-          vol.snapshot_policies.create(name=name, retention_count=int(args.snappol[0]),interval=args.snappol[1], tenant=tenant)
-       if args.volperf:
-          vol.performance_policy.create(total_iops_max = int(args.volperf[0]),total_bandwidth_max = int(args.volperf[1]), tenant=tenant)
-    else:
-       vol = si.volumes.create(name=name,size=int(args.size),replica_count=int(numreplicas))
-       if args.snappol:
-          vol.snapshot_policies.create(name=name,retention_count=int(args.snappol[0]),interval=args.snappol[1])
-       if args.volperf:
-          vol.performance_policy.create(total_iops_max = int(args.volperf[0]),total_bandwidth_max = int(args.volperf[1]))
-
+    vol = si.volumes.create(
+        name=name, size=int(args.size),
+        replica_count=int(numreplicas))
+    if args.snappol:
+       vol.snapshot_policies.create(
+         name=name, retention_count=int(args.snappol[0]),
+         interval=args.snappol[1])
+    if args.volperf:
+       vol.performance_policy.create(
+         total_iops_max = int(args.volperf[0]), 
+         total_bandwidth_max = int(args.volperf[1]))
     return vol['uuid']
 
 
@@ -201,168 +189,55 @@ def target_login(node, si, initiator, sleep=SLEEP):
         run_cmd(cmd.format(iqn, ip))
 
 
-#def clean_all(api, target):
-#    for app_instance in api.app_instances.list():
-#        if not app_instance["name"].startswith(target):
-#            continue
-#        print "Delete app instance " + app_instance['name']
-#        app_instance.set(admin_state="offline", force=True)
-#        app_instance.delete()
-#    for initiator in api.initiators.list():
-#        if not initiator["name"].startswith(target):
-#            continue
-#        print "Delete initiator " + initiator['name']
-#        initiator.delete()
-
-def clean_all(api, target, args):
-    # Check API Version
-    if api.system.get()['sw_version'].startswith(API_VER):
-       if args.tenant:
-          tenantname = "/root/" + args.tenant
-       else:
-          tenantname = ''
-       # Deleting app instances
-       for app_instance in api.app_instances.list(tenant=tenantname):
-          if not app_instance["name"].startswith(target):
-              continue
-          print "Delete app instance " + app_instance['name']
-          app_instance.set(admin_state="offline", force=True, tenant=tenantname)
-          app_instance.delete(tenant=tenantname)
-     
-       # Deleting initators
-       for initiator in api.initiators.list():
-          if not initiator["name"].startswith(target):
-             continue
-          print "Delete initiator " + initiator['name']
-          initiator.delete()
-
-       # Deleting tenants
-       if tenantname != '':
-          for tenant in api.tenants.list():
-             if tenant['path'] == '/tenants/root':
-                continue
-             if not api.app_instances.list():
-                tenant.delete(tenant=tenantname)
-                print "Deleted tenant " + tenant['name']
-             else:
-                print "Tenant is not empty and hence was not deleted"
-
-       #for tenant in api.tenants.list():
-       #   # sets tenantname to root tenant
-       #   if args.tenant not in tenant["name"]:
-       #       tenantname = ''
-       #   # sets tenantname to args.tenant
-       #   else:
-       #       tenantname = "/root/" + args.tenant
-       #   for app_instance in api.app_instances.list(tenant=tenantname):
-       #      if not app_instance["name"].startswith(target):
-       #          continue
-       #      print "Delete app instance " + app_instance['name']
-       #      app_instance.set(admin_state="offline", force=True, tenant=tenantname)
-       #      app_instance.delete(tenant=tenantname)
-       #   # Deleting tenants
-       #   if not tenant["name"].startswith(args.tenant):
-       #      continue
-       #   if tenant['path'] == '/tenants/root':
-       #      continue
-       #   print "Delete tenant " + tenant['name']
-       #   tenant.delete(tenant=tenantname)
-
-    else:
-       for app_instance in api.app_instances.list():
-           if not app_instance["name"].startswith(target):
-             continue
-           print "Delete app instance " + app_instance['name']
-           app_instance.set(admin_state="offline", force=True)
-           app_instance.delete()
-
-       for initiator in api.initiators.list():
-          if not initiator["name"].startswith(target):
-              continue
-          print "Delete initiator " + initiator['name']
-          initiator.delete()
+def clean_all(api, target):
+    for app_instance in api.app_instances.list():
+        if not app_instance["name"].startswith(target):
+            continue
+        print "Delete app instance " + app_instance['name']
+        app_instance.set(admin_state="offline", force=True)
+        app_instance.delete()
+    for initiator in api.initiators.list():
+        if not initiator["name"].startswith(target):
+            continue
+        print "Delete initiator " + initiator['name']
+        initiator.delete()
 
 
 def sn_to_hostname(api, sn):
-    #uuid = sn.split("/")[2]
-    if api.system.get()['sw_version'].startswith(API_VER):
-       uuid = sn['path'].split("/")[2]
-    else:
-       uuid = sn.split("/")[2]
+    uuid = sn.split("/")[2]
     sn = api.storage_nodes.get(uuid)
     return sn['name']
 
 def si_to_hostname(api, si):
     sn_name = 'undef'
     for sn in si['active_storage_nodes']:
-       if api.system.get()['sw_version'].startswith(API_VER):
-          uuid = sn['path'].split("/")[2]
-       else:
-          uuid = sn.split("/")[2]
-       sn = api.storage_nodes.get(uuid)
-       sn_name = 'undef'
-       sn_name = sn['name']
+        uuid = sn.split("/")[2]
+        sn = api.storage_nodes.get(uuid)
+	sn_name = 'undef'
+	sn_name = sn['name']
     #todo, this only returns the last active server in the list 
     return sn_name
 
 def show_all(api):
     for at in api.app_templates.list():
         print "App_Template: " + at['name']
-    #for ai in api.app_instances.list():
-    #    print "App_instance: " + ai['name']
-    #    print "    admin_state: ", ai['admin_state']
-    #    for si in ai.storage_instances.list():
-    #        print "    -Storage_instance: " + si['name']
-    #        for i in si.acl_policy.initiators.list():
-    #            print "        +Initiators: %s  (%s)" % (i['id'], i['name'])
-    #        if 'iqn' in si['access']:
-    #            print "        +IQN: " + si['access']['iqn']
-    #        for ip in si['access']['ips']:
-    #            print "        +ACCESS IP: " + ip
-    #        for sn in si['active_storage_nodes']:
-    #            print "        +ACTIVE_STORAGE_NODES: " + sn_to_hostname(
-    #                  api, sn)
-    #        for v in si.volumes.list():
-    #            print "        =Volume: {},   Size : {},   UUID : {} ".format(
-    #                v['name'], v['size'], v['uuid'])
-    if api.system.get()['sw_version'].startswith(API_VER):
-       for tenant in api.tenants.list():
-           print "Tenant: " + tenant['name']
-           if tenant["name"] != "root" :
-                tenant = "/root/" + tenant["name"]
-           else:
-                tenant = "/" + tenant["name"]
-           for ai in api.app_instances.list(tenant=tenant):
-               print "  App_instance: " + ai['name']
-               print "    admin_state: ", ai['admin_state']
-               for si in ai.storage_instances.list(tenant=tenant):
-                   print "    -Storage_instance: " + si['name']
-                   for i in si.acl_policy.initiators.list(tenant=tenant):
-                       print "        +Initiators: %s  (%s)" % (i['id'], i['name'])
-                   if 'iqn' in si['access']:
-                       print "        +IQN: " + si['access']['iqn']
-                   for ip in si['access']['ips']:
-                       print "        +ACCESS IP: " + ip
-                   for sn in si['active_storage_nodes']:
-                       print "        +ACTIVE_STORAGE_NODES: " + sn_to_hostname(api, sn)
-                   for v in si.volumes.list(tenant=tenant):
-                       print "        =Volume: {},   Size : {},   UUID : {} ".format(v['name'], v['size'], v['uuid'])
-    else:
-       for ai in api.app_instances.list():
-           print "App_instance: " + ai['name']
-           print "    admin_state: ", ai['admin_state']
-           for si in ai.storage_instances.list():
-               print "    -Storage_instance: " + si['name']
-               for i in si.acl_policy.initiators.list():
-                   print "        +Initiators: %s  (%s)" % (i['id'], i['name'])
-               if 'iqn' in si['access']:
-                   print "        +IQN: " + si['access']['iqn']
-               for ip in si['access']['ips']:
-                   print "        +ACCESS IP: " + ip
-               for sn in si['active_storage_nodes']:
-                   print "        +ACTIVE_STORAGE_NODES: " + sn_to_hostname(api, sn)
-               for v in si.volumes.list():
-                   print "        =Volume: {},   Size : {},   UUID : {} ".format(v['name'], v['size'], v['uuid'])
+    for ai in api.app_instances.list():
+        print "App_instance: " + ai['name']
+        print "    admin_state: ", ai['admin_state']
+        for si in ai.storage_instances.list():
+            print "    -Storage_instance: " + si['name']
+            for i in si.acl_policy.initiators.list():
+                print "        +Initiators: %s  (%s)" % (i['id'], i['name'])
+            if 'iqn' in si['access']:
+                print "        +IQN: " + si['access']['iqn']
+            for ip in si['access']['ips']:
+                print "        +ACCESS IP: " + ip
+            for sn in si['active_storage_nodes']:
+                print "        +ACTIVE_STORAGE_NODES: " + sn_to_hostname(
+                      api, sn)
+            for v in si.volumes.list():
+                print "        =Volume: {},   Size : {},   UUID : {} ".format(
+                    v['name'], v['size'], v['uuid'])
 
 
 # [0] = dmpath, [1] = mntpoint, [2] = cmdargs
@@ -402,61 +277,32 @@ def dm_to_mapper(dm):
 def mapper_to_dmpath(mapper):
     return "/dev/mapper/" + mapper
 
-def map_def(api, args, basename):
+def map_def(api, basename, ai_list):
      map = {}
-     #for ai in ai_list:
-     #   ai = ai.reload()
-     #   for si in ai['storage_instances'].itervalues():
-     #       for v in si['volumes'].itervalues():
-     #           id = v['uuid']
-     #           if not basename or basename in ai['name']:
-     #               map[id] = {'aname': ai['name'], 'sname': si['name'],'vname': v['name'], 'id': id, 'nodename': si_to_hostname(api,si) }
-     #               if 'iqn' in si['access']:
-     #                   map[id]['iqn'] = si['access']['iqn']
-     if args.clone:
-        assert CLONE_AI_LIST, "clone list is EMPTY"
-        ai_list = CLONE_AI_LIST
-     else:
-        if api.system.get()['sw_version'].startswith(API_VER):
-           for t in api.tenants.list():
-              t = t.reload()
-              if t["name"] != "root" :
-                 tenant = "/root/" + t["name"]
-              else:
-                 tenant = "/" + t["name"]
-              for ai in api.app_instances.list(tenant=tenant):
-                 for si in ai['storage_instances']:
-                    for v in si['volumes']:
-                       id = v['uuid']
-                       if not basename or basename in ai['name']:
-                          map[id] = {'tname': t['name'], 'aname': ai['name'], 'sname': si['name'],'vname': v['name'], 'id': id, 'nodename': si_to_hostname(api,si) }
-                          if 'iqn' in si['access']:
-                              map[id]['iqn'] = si['access']['iqn']
-        else:
-           for ai in api.app_instances.list():
-              ai = ai.reload()
-              for si in ai['storage_instances'].itervalues():
-                 for v in si['volumes'].itervalues():
-                    id = v['uuid']
-                    if not basename or basename in ai['name']:
-                       map[id] = {'aname': ai['name'], 'sname': si['name'],'vname': v['name'], 'id': id, 'nodename': si_to_hostname(api,si) }
-                       if 'iqn' in si['access']:
-                           map[id]['iqn'] = si['access']['iqn']
+     for ai in ai_list:
+        ai = ai.reload()
+        for si in ai['storage_instances'].itervalues():
+            for v in si['volumes'].itervalues():
+                id = v['uuid']
+                if not basename or basename in ai['name']:
+                    map[id] = {'aname': ai['name'], 'sname': si['name'],'vname': v['name'], 'id': id, 'nodename': si_to_hostname(api,si) }
+                    if 'iqn' in si['access']:
+                        map[id]['iqn'] = si['access']['iqn']
      return map
   
 
-def mpmap(api, args, tenant):
+def mpmap(api, args):
     dist = platform.dist()[0]
     #map = {}
     mntmap = []
     basename = args.basename
 
-#    if args.clone:
-#       assert CLONE_AI_LIST, "clone list is EMPTY"
-#       ai_list = CLONE_AI_LIST
-#    else:
-#       ai_list = api.app_instances.list()
-    map = map_def(api, args, basename)
+    if args.clone:
+       assert CLONE_AI_LIST, "clone list is EMPTY"
+       ai_list = CLONE_AI_LIST
+    else:
+       ai_list = api.app_instances.list()
+    map = map_def(api, basename, ai_list)
     
     for m in map:
         if args.volperf:
@@ -475,24 +321,11 @@ def mpmap(api, args, tenant):
                 sys.exit(-1)
             dmpath = mapper_to_dmpath(mapper)
 
-            #print "HOST-DM: " + dm + \
-            #      "   DATERA: " + map[m]['aname'] + "/" + map[m]['sname']  + "/" + map[m]['vname'] + \
-            #      "   IQN: " + map[m]['iqn'] + \
-            #      "   MAPPER: /dev/mapper/" + mapper + \
-            #      "   NODE:" + map[m]['nodename']
-
-            if api.system.get()['sw_version'].startswith(API_VER):
-               print "HOST-DM: " + dm + \
-                     "   DATERA: " + map[m]['tname'] + "/" + map[m]['aname'] + "/" + map[m]['sname']  + "/" + map[m]['vname'] + \
-                     "   IQN: " + map[m]['iqn'] + \
-                     "   MAPPER: /dev/mapper/" + mapper + \
-                     "   NODE:" + map[m]['nodename']
-            else:
-               print "HOST-DM: " + dm + \
-                     "   DATERA: " + map[m]['aname'] + "/" + map[m]['sname']  + "/" + map[m]['vname'] + \
-                     "   IQN: " + map[m]['iqn'] + \
-                     "   MAPPER: /dev/mapper/" + mapper + \
-                     "   NODE:" + map[m]['nodename']
+            print "HOST-DM: " + dm + \
+                  "   DATERA: " + map[m]['aname'] + "/" + map[m]['sname']  + "/" + map[m]['vname'] + \
+                  "   IQN: " + map[m]['iqn'] + \
+                  "   MAPPER: /dev/mapper/" + mapper + \
+                  "   NODE:" + map[m]['nodename']
 
             if args.mkfs or args.clone:
                 # ASSUME "singleton" 1:1:1 (app_inst:storage_inst:vol)
@@ -514,7 +347,7 @@ def create_fio_template():
        for line in lines:
           f.write(line + '\n')
 
-def create_fio_files(api,args,tenant):
+def create_fio_files(api,args):
 
     fio = {args.basename + '_randread.fio':{'rw':'randread', 'blocksize':'4k'},
            args.basename + '_seqread.fio':{'rw':'read', 'blocksize':'1m'},
@@ -524,7 +357,7 @@ def create_fio_files(api,args,tenant):
           }
 
     create_fio_template()
-    mntmap = mpmap(api,args,tenant)
+    mntmap = mpmap(api,args)
 
     for key,item in fio.items():
        with open('fiotemplate.fio', 'r') as f:
@@ -537,7 +370,7 @@ def create_fio_files(api,args,tenant):
                 for index in range(len(mntmap)):
                    #key.write("[" + str(key).split()[2].strip(',') + "]" + '\n')
                    key.write("[fiofile]" + '\n')
-                   key.write("directory=/" + mntmap[index][1] + '\n')
+                   key.write("directory=" + mntmap[index][1] + '\n')
                    key.write("size=500M" + '\n')
              else:
                  for id in mntmap:
@@ -576,102 +409,52 @@ def copy_snapshot_policy(new_app_instance, volume_map, si, vol):
 
 def clone_an_app_instance(api,args):
     clone_ai_list = []
-#    for app_instance in api.app_instances.list():
-#        if app_instance["name"].startswith(args.basename):
-#	    try:
-#                # get volume id
-#                volume_map = get_volume_id_and_path(api, app_instance)
-#                for si in volume_map.keys():
-#                   for vol in volume_map[si].keys():
-#                      # clone app Intance with volume id as the new name
-#                      new_app_instance = api.app_instances.create(name=app_instance['name'] + "_clone", clone_src=volume_map[si][vol]['path'])
-#                      # copy acl policies
-#                      if 'acl_policy' in volume_map[si][vol]:
-#                         acl_policy = api.app_instances.get(app_instance['name']).storage_instances.get(si).acl_policy.get()
-#                         new_app_instance.storage_instances.get(si).acl_policy.set(initiators=[str(volume_map[si][vol]['acl_policy'][0])])
-#                         time.sleep(2)
-#                         if new_app_instance.reload()['storage_instances'][si]['op_state'] != "available":
-#                             print "error copying acl_policies"
-#                             sys.exit(1) 
-#                         #add initiator groups
-#                      # copy performance policies
-#                      if 'performance_policy' in volume_map[si][vol]:
-#                         performance_policy = api.app_instances.get(app_instance['name']).storage_instances.get(si).volumes.get(vol).performance_policy.list()[0]
-#                         new_app_instance.storage_instances.get(si).volumes.get(vol).performance_policy.create(total_iops_max=performance_policy['total_iops_max'],
-#                         total_bandwidth_max=performance_policy['total_bandwidth_max'],
-#                         read_iops_max=performance_policy['read_iops_max'],
-#                         read_bandwidth_max=performance_policy['read_bandwidth_max'],
-#                         write_iops_max=performance_policy['write_iops_max'],
-#                         write_bandwidth_max=performance_policy['write_bandwidth_max'])
-#                         time.sleep(2)
-#                         if new_app_instance.reload()['storage_instances'][si]['op_state'] != "available":
-#                             print "error copying performance_policies"
-#                             sys.exit(1) 
-#                      # copy snapshot policies
-#                      if 'snapshot_policy' in volume_map[si][vol]:
-#                         copy_snapshot_policy(new_app_instance, volume_map, si, vol)
-#                         time.sleep(2)
-#                         if new_app_instance.reload()['storage_instances'][si]['op_state'] != "available":
-#                             print "error copying snapshot_policies"
-#                             sys.exit(1) 
-#                      print "cloned " + app_instance['name'] + " to " + new_app_instance['name']
-#                      state = api.app_instances.get(new_app_instance["name"]).set(admin_state="online")
-#                      print "setting admin state of " + new_app_instance['name'] + " to " + state["admin_state"]
-#                      clone_ai_list.append(new_app_instance)
-#            except KeyError:
-#                msg = "appInstance: [{}] doesn't exist".format(app_instance['name'])
-#                print msg
-#                continue
-    if api.system.get()['sw_version'].startswith(API_VER):
-       print "cloning via dhutil is not yet supported in " + api.system.get()['sw_version']
-       sys.exit(-1)
-    else:
-        for app_instance in api.app_instances.list():
-            if app_instance["name"].startswith(args.basename):
-               try:
-                    # get volume id
-                    volume_map = get_volume_id_and_path(api, app_instance)
-                    for si in volume_map.keys():
-                       for vol in volume_map[si].keys():
-                          # clone app Intance with volume id as the new name
-                          new_app_instance = api.app_instances.create(name=app_instance['name'] + "_clone", clone_src=volume_map[si][vol]['path'])
-                          # copy acl policies
-                          if 'acl_policy' in volume_map[si][vol]:
-                             acl_policy = api.app_instances.get(app_instance['name']).storage_instances.get(si).acl_policy.get()
-                             new_app_instance.storage_instances.get(si).acl_policy.set(initiators=[str(volume_map[si][vol]['acl_policy'][0])])
-                             time.sleep(2)
-                             if new_app_instance.reload()['storage_instances'][si]['op_state'] != "available":
-                                 print "error copying acl_policies"
-                                 sys.exit(1)
-                             #add initiator groups
-                          # copy performance policies
-                          if 'performance_policy' in volume_map[si][vol]:
-                             performance_policy = api.app_instances.get(app_instance['name']).storage_instances.get(si).volumes.get(vol).performance_policy.list()[0]
-                             new_app_instance.storage_instances.get(si).volumes.get(vol).performance_policy.create(total_iops_max=performance_policy['total_iops_max'],
-                             total_bandwidth_max=performance_policy['total_bandwidth_max'],
-                             read_iops_max=performance_policy['read_iops_max'],
-                             read_bandwidth_max=performance_policy['read_bandwidth_max'],
-                             write_iops_max=performance_policy['write_iops_max'],
-                             write_bandwidth_max=performance_policy['write_bandwidth_max'])
-                             time.sleep(2)
-                             if new_app_instance.reload()['storage_instances'][si]['op_state'] != "available":
-                                 print "error copying performance_policies"
-                                 sys.exit(1)
-                          # copy snapshot policies
-                          if 'snapshot_policy' in volume_map[si][vol]:
-                             copy_snapshot_policy(new_app_instance, volume_map, si, vol)
-                             time.sleep(2)
-                             if new_app_instance.reload()['storage_instances'][si]['op_state'] != "available":
-                                 print "error copying snapshot_policies"
-                                 sys.exit(1)
-                          print "cloned " + app_instance['name'] + " to " + new_app_instance['name']
-                          state = api.app_instances.get(new_app_instance["name"]).set(admin_state="online")
-                          print "setting admin state of " + new_app_instance['name'] + " to " + state["admin_state"]
-                          clone_ai_list.append(new_app_instance)
-               except KeyError:
-                    msg = "appInstance: [{}] doesn't exist".format(app_instance['name'])
-                    print msg
-                    continue
+    for app_instance in api.app_instances.list():
+        if app_instance["name"].startswith(args.basename):
+	    try:
+                # get volume id
+                volume_map = get_volume_id_and_path(api, app_instance)
+                for si in volume_map.keys():
+                   for vol in volume_map[si].keys():
+                      # clone app Intance with volume id as the new name
+                      new_app_instance = api.app_instances.create(name=app_instance['name'] + "_clone", clone_src=volume_map[si][vol]['path'])
+                      # copy acl policies
+                      if 'acl_policy' in volume_map[si][vol]:
+                         acl_policy = api.app_instances.get(app_instance['name']).storage_instances.get(si).acl_policy.get()
+                         new_app_instance.storage_instances.get(si).acl_policy.set(initiators=[str(volume_map[si][vol]['acl_policy'][0])])
+                         time.sleep(2)
+                         if new_app_instance.reload()['storage_instances'][si]['op_state'] != "available":
+                             print "error copying acl_policies"
+                             sys.exit(1) 
+                         #add initiator groups
+                      # copy performance policies
+                      if 'performance_policy' in volume_map[si][vol]:
+                         performance_policy = api.app_instances.get(app_instance['name']).storage_instances.get(si).volumes.get(vol).performance_policy.list()[0]
+                         new_app_instance.storage_instances.get(si).volumes.get(vol).performance_policy.create(total_iops_max=performance_policy['total_iops_max'],
+                         total_bandwidth_max=performance_policy['total_bandwidth_max'],
+                         read_iops_max=performance_policy['read_iops_max'],
+                         read_bandwidth_max=performance_policy['read_bandwidth_max'],
+                         write_iops_max=performance_policy['write_iops_max'],
+                         write_bandwidth_max=performance_policy['write_bandwidth_max'])
+                         time.sleep(2)
+                         if new_app_instance.reload()['storage_instances'][si]['op_state'] != "available":
+                             print "error copying performance_policies"
+                             sys.exit(1) 
+                      # copy snapshot policies
+                      if 'snapshot_policy' in volume_map[si][vol]:
+                         copy_snapshot_policy(new_app_instance, volume_map, si, vol)
+                         time.sleep(2)
+                         if new_app_instance.reload()['storage_instances'][si]['op_state'] != "available":
+                             print "error copying snapshot_policies"
+                             sys.exit(1) 
+                      print "cloned " + app_instance['name'] + " to " + new_app_instance['name']
+                      state = api.app_instances.get(new_app_instance["name"]).set(admin_state="online")
+                      print "setting admin state of " + new_app_instance['name'] + " to " + state["admin_state"]
+                      clone_ai_list.append(new_app_instance)
+            except KeyError:
+                msg = "appInstance: [{}] doesn't exist".format(app_instance['name'])
+                print msg
+                continue
     return clone_ai_list
    
 def chktempl(api, templ):
@@ -761,10 +544,6 @@ def chk_args(args):
        if args.snappol[1] not in ('15min','1hour','1day','1week','1month','1year'):
           print "ERROR: INTERVAL must be '15min' or '1hour' or '1day' or '1week' or '1month' or '1year'"
           usage()
-
-    if args.tenant == "root":
-        print "ERROR: root is not an allowed value for the tenant argument"
-        usage()
     
 
 def iscsiadm_chk():
@@ -864,8 +643,6 @@ def main():
                        help='volume-level iops and bandwidth policies')
     parser.add_argument('--clone', action="store_true",
                        help='clones app instances that start with basename')
-    parser.add_argument('--tenant', action="store",
-                       help='creates tenant with given name. If exists, uses that tenant')
     args = parser.parse_args()
 
     creds = os.getenv("DTSCREDS")
@@ -885,33 +662,26 @@ def main():
     try:
         print "Connecting to : ", ipaddr
         api = DateraApi(username=user, password=password, hostname=ipaddr)
-        # check sw verstion, and if it is 2.1, import the 2.1 API
-        if api.system.get()['sw_version'].startswith(API_VER):
-           if args.tenant:
-              api = DateraApi21(username=user, password=password, hostname=ipaddr, tenant="/root/" + args.tenant)
-           else:
-              api = DateraApi21(username=user, password=password, hostname=ipaddr, tenant=None)
     except Exception as e:
         PrintException()
         sys.exit(1)
 
     host = os.uname()[1].split('.')[0]
-    tenant = ''
 
     if args.cleanall:
         unmount(basename)
         target_logout_and_node_cleanup(api, host, basename)
-        clean_all(api, basename, args)
+        clean_all(api, basename)
         sys.exit(0)
 
     if args.showall:
         show_all(api)
         if args.mpmap:
-            mpmap(api, args, tenant)
+            mpmap(api, args)
         sys.exit(0)
 
     if args.mpmap and not args.count:
-        mpmap(api, args, tenant)
+        mpmap(api, args)
         sys.exit(0)
 
     cmd = "grep '^InitiatorName' /etc/iscsi/initiatorname.iscsi"
@@ -929,141 +699,52 @@ def main():
     # Make sure template exists
     if args.template:
         if chktempl(api, args.template):
-#            # Create N app_instances from the template
-#            for n in range(1, args.count + 1):
-#                appname = "%s-%d" % (args.basename, n)
-#                tname = "/app_templates/" + args.template
-#                ai = api.app_instances.create(name=appname, app_template=tname)
-#                print "Created app_instance: ", ai['name']
-#                for si in ai.storage_instances.list():
-#                    si.acl_policy.initiators.add(ii)
-#            # Login to the storage
-#            # get app instance status
-#            for ai in api.app_instances.list():
-#                if args.basename in ai['name']:
-#                    for si in ai.storage_instances.list():
-            # If API version > API_VER
-            if api.system.get()['sw_version'].startswith(API_VER):
-                if args.tenant:
-                   for subtenant in api.tenants.list()[0]['subtenants']:
-                       if subtenant.endswith(args.tenant):
-                           print "Using prexisting subtenant " + args.tenant
-                           tenant = "/root/" + args.tenant
-                   if tenant == '':
-                       api.tenants.create(name=args.tenant)
-                       print "Created subtenant: ", args.tenant
-                       tenant = "/root/" + args.tenant
-                # Create N app_instances from the template
-                for n in range(1, args.count + 1):
-                   appname = "%s-%d" % (args.basename, n)
-                   tname = "/app_templates/" + args.template
-                   print "I got here"
-                   ai = api.app_instances.create(name=appname, app_template=tname, tenant=tenant)
-                   print "I got here too"
-                   print "Created app_instance: ", ai['name']
-                   for si in ai.storage_instances.list(tenant=tenant):
-                      si.acl_policy.initiators.add(ii,tenant=tenant)
-                # Login to the storage
-                # get app instance status
-                for ai in api.app_instances.list(tenant=tenant):
-                   if args.basename in ai['name']:
-                      for si in ai.storage_instances.list(tenant=tenant):
-                         op_state_poller(si)
-                         print si['name'] + " is online"
-                         target_login(host, si, iscsi_initiator, sleep=0)
-                run_cmd("lsscsi -t")
-            else:
-               for n in range(1, args.count + 1):
-                   appname = "%s-%d" % (args.basename, n)
-                   tname = "/app_templates/" + args.template
-                   ai = api.app_instances.create(name=appname, app_template=tname)
-                   print "Created app_instance: ", ai['name']
-                   for si in ai.storage_instances.list():
-                      si.acl_policy.initiators.add(ii)
-               # Login to the storage
-               # get app instance status
-               for ai in api.app_instances.list():
-                  if args.basename in ai['name']:
-                     for si in ai.storage_instances.list():
+            # Create N app_instances from the template
+            for n in range(1, args.count + 1):
+                appname = "%s-%d" % (args.basename, n)
+                tname = "/app_templates/" + args.template
+                ai = api.app_instances.create(name=appname, app_template=tname)
+                print "Created app_instance: ", ai['name']
+                for si in ai.storage_instances.list():
+                    si.acl_policy.initiators.add(ii)
+            # Login to the storage
+            # get app instance status
+            for ai in api.app_instances.list():
+                if args.basename in ai['name']:
+                    for si in ai.storage_instances.list():
                         op_state_poller(si)
                         print si['name'] + " is online"
                         target_login(host, si, iscsi_initiator, sleep=0)
-               run_cmd("lsscsi -t")
+            run_cmd("lsscsi -t")
         else:
             print args.template, " : does not exist!"
             sys.exit(-1)
     elif args.count:
-#        #
-#        # Create N app_instances, storage_instance, and add initiator
-#        #
-#        for i in range(1, args.count + 1):
-#            bname = "{}_{}".format(basename, i)
-#            ai = api.app_instances.create(name=bname)
-#            si = ai.storage_instances.create(name=bname)
-#            si.acl_policy.initiators.add(ii)
-#            volname = "{}_vol".format(bname)
-#            uuid = vol_create(si, volname, args)
-#            print "Created Volume: %s (%s)" % (volname, uuid)
-#
-#        for ai in api.app_instances.list():
-#            if basename in ai['name']:
-#                # Wait until storage instance is online
-#                for si in ai.storage_instances.list():
-#                   op_state_poller(si)
-#                   print si['name'] + " is online"
-#                   target_login(host, si, iscsi_initiator, sleep=0)
-        #if api.system.get()['sw_version'] > API_VER:
-        if api.system.get()['sw_version'].startswith(API_VER):
-           #
-           # Create N app_instances, storage_instance, and add initiator
-           #
-           if args.tenant:
-              for subtenant in api.tenants.list()[0]['subtenants']:
-                  if subtenant.endswith(args.tenant):
-                      print "Using prexisting subtenant " + args.tenant
-                      tenant = "/root/" + args.tenant
-              if tenant == '':
-                  api.tenants.create(name=args.tenant)
-                  print "Created subtenant: ", args.tenant
-                  tenant = "/root/" + args.tenant
-           for i in range(1, args.count + 1):
-              bname = "{}_{}".format(basename, i)
-              ai = api.app_instances.create(name=bname, tenant=tenant)
-              si = ai.storage_instances.create(name=bname, tenant=tenant)
-              si.acl_policy.initiators.add(ii, tenant=tenant)
-              volname = "{}_vol".format(bname)
-              uuid = vol_create(si, volname, args, api)
-              print "Created Volume: %s (%s)" % (volname, uuid)
-           for ai in api.app_instances.list(tenant=tenant):
-              if basename in ai['name']:
-                 # Wait until storage instance is online
-                 for si in ai.storage_instances.list(tenant=tenant):
-                    op_state_poller(si)
-                    print si['name'] + " is online"
-                    target_login(host, si, iscsi_initiator, sleep=0)
-        else:
-           for i in range(1, args.count + 1):
-              bname = "{}_{}".format(basename, i)
-              ai = api.app_instances.create(name=bname)
-              si = ai.storage_instances.create(name=bname)
-              si.acl_policy.initiators.add(ii)
-              volname = "{}_vol".format(bname)
-              uuid = vol_create(si, volname, args, api)
-              print "Created Volume: %s (%s)" % (volname, uuid)
+        #
+        # Create N app_instances, storage_instance, and add initiator
+        #
+        for i in range(1, args.count + 1):
+            bname = "{}_{}".format(basename, i)
+            ai = api.app_instances.create(name=bname)
+            si = ai.storage_instances.create(name=bname)
+            si.acl_policy.initiators.add(ii)
+            volname = "{}_vol".format(bname)
+            uuid = vol_create(si, volname, args)
+            print "Created Volume: %s (%s)" % (volname, uuid)
 
-           for ai in api.app_instances.list():
-              if basename in ai['name']:
-                 # Wait until storage instance is online
-                 for si in ai.storage_instances.list():
-                    op_state_poller(si)
-                    print si['name'] + " is online"
-                    target_login(host, si, iscsi_initiator, sleep=0)
+        for ai in api.app_instances.list():
+            if basename in ai['name']:
+                # Wait until storage instance is online
+                for si in ai.storage_instances.list():
+                   op_state_poller(si)
+                   print si['name'] + " is online"
+                   target_login(host, si, iscsi_initiator, sleep=0)
 
 
         run_cmd("lsscsi -t")
 
     if args.createfio:
-        create_fio_files(api,args,tenant)
+        create_fio_files(api,args)
     
     if args.clone:
         cmd="mount |grep " + args.basename
@@ -1077,7 +758,7 @@ def main():
                 target_login(host, si, iscsi_initiator, sleep=0)
 
         run_cmd("lsscsi -t")
-        mntmap = mpmap(api, args,tenant)
+        mntmap = mpmap(api, args)
         
         try:
            output = subprocess.check_output(cmd, shell=True)
@@ -1096,7 +777,7 @@ def main():
            pass
 
     if args.mkfs:
-        mntmap = mpmap(api, args, tenant)
+        mntmap = mpmap(api, args)
         pool = mp.Pool()
         list(pool.imap_unordered(mkfs, mntmap))
         
